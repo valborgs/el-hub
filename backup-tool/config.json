@@ -1,0 +1,14 @@
+{
+  "source_dir": "C:/Users/User/Desktop/work",
+  "backup_dir": "D:/백업/test",
+  "excludes": [
+    "backup-tool",
+    "auto",
+    "complete"
+  ],
+  "includes": [
+    "0.디지털파일_매크로.xlsm"
+  ],
+  "theme": "light",
+  "gdrive_enabled": false
+}

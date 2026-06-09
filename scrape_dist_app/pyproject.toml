@@ -1,0 +1,19 @@
+[project]
+name = "scrape_dist_app"
+version = "0.1.0"
+description = "구글 시트 스크래핑 + 오류항목 자동분배 파이프라인"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "google-auth>=2.49.2",
+    "gspread>=6.2.1",
+    "markdown>=3.10.2",
+    "openpyxl>=3.1.5",
+    "pandas>=3.0.2",
+    "pyinstaller>=6.20.0",
+    "pyside6>=6.11.0",
+    "qt-material>=2.17",
+]
+
+[project.scripts]
+gui = "gui.app:main"

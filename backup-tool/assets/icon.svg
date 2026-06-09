@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="folderBack" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#6395E8"/>
+      <stop offset="100%" stop-color="#3D6BD0"/>
+    </linearGradient>
+    <linearGradient id="folderFront" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#82AAF1"/>
+      <stop offset="100%" stop-color="#5483DD"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 폴더 뒷판(탭 포함) -->
+  <path d="M 32 60
+           L 100 60
+           L 118 84
+           L 212 84
+           Q 224 84 224 96
+           L 224 204
+           Q 224 216 212 216
+           L 44 216
+           Q 32 216 32 204
+           Z"
+        fill="url(#folderBack)"/>
+
+  <!-- 폴더 앞판 -->
+  <path d="M 32 104
+           L 224 104
+           L 224 204
+           Q 224 216 212 216
+           L 44 216
+           Q 32 216 32 204
+           Z"
+        fill="url(#folderFront)"/>
+
+  <!-- 앞판 상단 하이라이트 -->
+  <line x1="36" y1="104" x2="220" y2="104"
+        stroke="#FFFFFF" stroke-width="1.5" opacity="0.4"/>
+
+  <!-- 시계 배지 그림자 -->
+  <circle cx="186" cy="186" r="52" fill="#000000" opacity="0.18"/>
+
+  <!-- 시계 배지 배경 -->
+  <circle cx="184" cy="184" r="50"
+          fill="#FFFFFF" stroke="#27324A" stroke-width="6"/>
+
+  <!-- 12 / 3 / 6 / 9 시 눈금 -->
+  <rect x="180" y="146" width="8" height="11" rx="2" fill="#27324A"/>
+  <rect x="211" y="180" width="11" height="8" rx="2" fill="#27324A"/>
+  <rect x="180" y="211" width="8" height="11" rx="2" fill="#27324A"/>
+  <rect x="146" y="180" width="11" height="8" rx="2" fill="#27324A"/>
+
+  <!-- 시침(10시 방향) / 분침(2시 방향) -->
+  <line x1="184" y1="184" x2="164" y2="166"
+        stroke="#27324A" stroke-width="6" stroke-linecap="round"/>
+  <line x1="184" y1="184" x2="210" y2="164"
+        stroke="#3D6BD0" stroke-width="5" stroke-linecap="round"/>
+
+  <!-- 시계 중심 핀 -->
+  <circle cx="184" cy="184" r="6" fill="#27324A"/>
+  <circle cx="184" cy="184" r="2.5" fill="#FFFFFF"/>
+</svg>
