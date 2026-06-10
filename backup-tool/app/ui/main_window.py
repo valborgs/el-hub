@@ -9,10 +9,11 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QSize, Qt, QTimer
+from PySide6.QtCore import QPoint, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QPalette, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
     QMenu,
     QMessageBox,
     QPlainTextEdit,
@@ -147,6 +149,116 @@ class _TitleBar(QWidget):
             self._toggle_max()
 
 
+class _GDriveFolderDialog(QDialog):
+    """구글 드라이브 폴더를 탐색하며 업로드 대상 폴더를 고르는 모달 대화상자.
+
+    Drive API 호출은 네트워크 블로킹이므로 백그라운드 스레드에서 수행하고,
+    결과는 `_folders_loaded` 시그널로 메인 스레드에 전달해 위젯을 갱신한다.
+    빠르게 폴더를 옮겨 다닐 때 이전 응답이 늦게 도착해 화면을 덮어쓰지
+    않도록 로드마다 세대(generation) 번호로 가드한다.
+    """
+
+    # (generation, [(id, name)...], error_message)
+    _folders_loaded = Signal(int, list, str)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("구글 드라이브 업로드 폴더 선택")
+        self.resize(360, 440)
+
+        # 루트부터 현재 폴더까지의 경로 스택: [(id, name), ...]
+        self._stack: list[tuple[str, str]] = [("root", "내 드라이브")]
+        self._load_gen = 0
+
+        lay = QVBoxLayout(self)
+
+        self._path_label = QLabel()
+        self._path_label.setWordWrap(True)
+        lay.addWidget(self._path_label)
+
+        nav_row = QHBoxLayout()
+        self._up_btn = QPushButton("⬆ 상위 폴더")
+        self._up_btn.clicked.connect(self._go_up)
+        nav_row.addWidget(self._up_btn)
+        nav_row.addStretch()
+        lay.addLayout(nav_row)
+
+        self._list = QListWidget()
+        self._list.itemDoubleClicked.connect(self._enter_item)
+        lay.addWidget(self._list, stretch=1)
+
+        self._status = QLabel("")
+        self._status.setWordWrap(True)
+        lay.addWidget(self._status)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        self._select_btn = QPushButton("이 폴더로 선택")
+        self._select_btn.clicked.connect(self.accept)
+        cancel_btn = QPushButton("취소")
+        cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(self._select_btn)
+        btn_row.addWidget(cancel_btn)
+        lay.addLayout(btn_row)
+
+        self._folders_loaded.connect(self._on_folders_loaded)
+        self._load_current()
+
+    def selected_folder(self) -> tuple[str, str]:
+        """선택된 (폴더 id, 표시 경로) 를 반환한다."""
+        folder_id = self._stack[-1][0]
+        path = "/".join(name for _, name in self._stack)
+        return folder_id, path
+
+    def _load_current(self) -> None:
+        self._load_gen += 1
+        gen = self._load_gen
+        self._path_label.setText("📁 " + "/".join(name for _, name in self._stack))
+        self._up_btn.setEnabled(len(self._stack) > 1)
+        self._list.clear()
+        self._list.setEnabled(False)
+        self._status.setText("불러오는 중...")
+        parent_id = self._stack[-1][0]
+        threading.Thread(
+            target=self._fetch_worker, args=(gen, parent_id), daemon=True
+        ).start()
+
+    def _fetch_worker(self, gen: int, parent_id: str) -> None:
+        from .. import gdrive
+        try:
+            folders = gdrive.list_subfolders(parent_id)
+            self._folders_loaded.emit(gen, folders, "")
+        except Exception as err:
+            self._folders_loaded.emit(gen, [], str(err))
+
+    def _on_folders_loaded(self, gen: int, folders: list, error: str) -> None:
+        if gen != self._load_gen:
+            return  # 더 새로운 로드가 시작됨 — 늦게 온 응답은 버린다.
+        self._list.setEnabled(True)
+        if error:
+            self._status.setText(f"폴더 목록을 불러오지 못했습니다: {error}")
+            return
+        for fid, name in folders:
+            item = QListWidgetItem("📁 " + name)
+            item.setData(Qt.ItemDataRole.UserRole, (fid, name))
+            self._list.addItem(item)
+        if folders:
+            self._status.setText("폴더를 더블클릭하면 들어갑니다. '이 폴더로 선택'으로 현재 폴더를 지정하세요.")
+        else:
+            self._status.setText("하위 폴더가 없습니다. '이 폴더로 선택'으로 현재 폴더를 지정하세요.")
+
+    def _enter_item(self, item: QListWidgetItem) -> None:
+        data = item.data(Qt.ItemDataRole.UserRole)
+        if data:
+            self._stack.append((data[0], data[1]))
+            self._load_current()
+
+    def _go_up(self) -> None:
+        if len(self._stack) > 1:
+            self._stack.pop()
+            self._load_current()
+
+
 class MainWindow(QWidget):
     """백업 프로그램의 메인 화면."""
 
@@ -179,6 +291,9 @@ class MainWindow(QWidget):
         self._gdrive_uploading = False
         # 다음 업로드 사이클에서 Drive 로 올릴 백업 파일들의 절대경로
         self._gdrive_pending: set[str] = set()
+        # 업로드 대상 Drive 폴더 (id 가 비면 '내 드라이브' 루트)
+        self._gdrive_folder_id = ""
+        self._gdrive_folder_path = ""
 
         self._build_ui()
         self._update_theme_btn()
@@ -304,8 +419,18 @@ class MainWindow(QWidget):
         # 텍스트 길이와 무관하게 오른쪽 컬럼 폭을 일정하게 유지한다.
         self._gdrive_status.setFixedWidth(140)
 
+        # 업로드 대상 Drive 폴더 선택 (로컬 '백업 저장 디렉토리'에 대응)
+        self._gdrive_folder_btn = QPushButton("업로드 폴더 선택")
+        self._gdrive_folder_btn.clicked.connect(self._browse_gdrive_folder)
+        self._gdrive_folder_label = QLabel("")
+        self._gdrive_folder_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._gdrive_folder_label.setWordWrap(True)
+        self._gdrive_folder_label.setFixedWidth(140)
+
         gdrive_layout.addWidget(self._gdrive_check, alignment=Qt.AlignmentFlag.AlignCenter)
         gdrive_layout.addWidget(self._gdrive_status)
+        gdrive_layout.addWidget(self._gdrive_folder_btn)
+        gdrive_layout.addWidget(self._gdrive_folder_label)
         gdrive_layout.addStretch()
 
         settings_row.addWidget(self._dir_group, stretch=1)
@@ -471,6 +596,10 @@ class MainWindow(QWidget):
         self._include_list.clear()
         self._include_list.addItems(cfg.includes)
 
+        self._gdrive_folder_id = cfg.gdrive_folder_id
+        self._gdrive_folder_path = cfg.gdrive_folder_path
+        self._update_gdrive_folder_label()
+
         if cfg.theme != self._theme:
             self._apply_theme(cfg.theme)
 
@@ -501,6 +630,8 @@ class MainWindow(QWidget):
             includes=includes,
             theme=self._theme,
             gdrive_enabled=self._gdrive_check.isChecked(),
+            gdrive_folder_id=self._gdrive_folder_id,
+            gdrive_folder_path=self._gdrive_folder_path,
         )
 
     # ----------------------------------------------------------- 버튼 핸들러
@@ -694,6 +825,7 @@ class MainWindow(QWidget):
         self._inc_add_btn.setEnabled(enabled)
         self._inc_del_btn.setEnabled(enabled)
         self._gdrive_check.setEnabled(enabled)
+        self._gdrive_folder_btn.setEnabled(enabled)
 
     # ------------------------------------------------------------- 트레이
     def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
@@ -803,6 +935,27 @@ class MainWindow(QWidget):
             self._stop_gdrive_timer()
         self._autosave_config()
 
+    def _update_gdrive_folder_label(self) -> None:
+        """선택된 업로드 폴더 경로를 라벨에 표시한다(미지정이면 루트)."""
+        path = self._gdrive_folder_path or "내 드라이브"
+        self._gdrive_folder_label.setText(f"업로드 위치:\n{path}")
+
+    def _browse_gdrive_folder(self) -> None:
+        """Drive 폴더 탐색 대화상자를 띄워 업로드 대상 폴더를 고른다."""
+        from .. import gdrive
+        if not gdrive.is_logged_in():
+            QMessageBox.information(
+                self, "구글 드라이브",
+                "허브에서 먼저 구글 계정으로 로그인해 주세요.",
+            )
+            return
+        dlg = _GDriveFolderDialog(self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._gdrive_folder_id, self._gdrive_folder_path = dlg.selected_folder()
+            self._update_gdrive_folder_label()
+            self._append_log(f"구글 드라이브 업로드 폴더를 '{self._gdrive_folder_path}'(으)로 지정했습니다.")
+            self._autosave_config()
+
     # --------------------------------------------------- 구글 드라이브 업로드
     def _start_gdrive_timer(self) -> None:
         """구글 드라이브 토글이 켜져 있으면 1시간 주기 타이머를 켜고 즉시 1회 업로드를 트리거한다."""
@@ -860,11 +1013,13 @@ class MainWindow(QWidget):
         self._gdrive_uploading = True
         threading.Thread(
             target=self._gdrive_upload_worker,
-            args=(backup_root, rel_paths),
+            args=(backup_root, rel_paths, self._gdrive_folder_id),
             daemon=True,
         ).start()
 
-    def _gdrive_upload_worker(self, backup_root: Path, rel_paths: list[str]) -> None:
+    def _gdrive_upload_worker(
+        self, backup_root: Path, rel_paths: list[str], folder_id: str
+    ) -> None:
         """백그라운드에서 Drive 업로드를 수행한다. UI 갱신은 signals 로 전달한다."""
         try:
             self._signals.log.emit(
@@ -874,6 +1029,7 @@ class MainWindow(QWidget):
             failed = gdrive.upload_files(
                 backup_root,
                 rel_paths,
+                parent_folder_id=folder_id or gdrive.ROOT_FOLDER_ID,
                 log_cb=self._signals.log.emit,
                 error_cb=self._signals.error.emit,
             )

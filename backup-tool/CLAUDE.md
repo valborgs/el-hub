@@ -72,6 +72,7 @@ Signals currently defined:
 - Toggle state mirrors token presence: turning the toggle ON triggers the OAuth flow; turning it OFF revokes the token and deletes `token.json`.
 - The 1-hour timer (`QTimer`, `_GDRIVE_INTERVAL_MS = 60 * 60 * 1000`) starts after `_on_sync_finished` succeeds and fires `_run_gdrive_upload` immediately + every hour.
 - `_run_gdrive_upload` snapshots `_gdrive_pending` (set of absolute backup file paths), clears it, converts to paths relative to `backup_dir`, and hands them to `gdrive.upload_files`. Failed paths are re-emitted via `path_backed_up` for retry next cycle.
+- The upload **target folder** is user-chosen (not hardcoded): the Drive group's "업로드 폴더 선택" button opens `_GDriveFolderDialog`, which browses the Drive tree via `gdrive.list_subfolders` (lazy, background-threaded with a generation guard). The choice is persisted to `config.json` as `gdrive_folder_id` / `gdrive_folder_path` and passed to `upload_files(parent_folder_id=...)`. An empty id falls back to `gdrive.ROOT_FOLDER_ID` ("root" = My Drive).
 - `upload_files` caches intermediate Drive folder IDs within a single cycle and reuses (rather than duplicates) same-named folders/files on Drive.
 
 ### Exclusion filtering

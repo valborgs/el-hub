@@ -131,7 +131,8 @@ python main.py
    - 생성된 클라이언트 ID의 JSON 키 파일을 다운로드합니다.
    - 다운로드한 파일 이름을 **`oauth_client.json`**으로 변경하여 프로젝트의 `credentials/` 폴더 내부에 위치시킵니다.
 6. **대상 폴더 설정**:
-   - 구글 드라이브에서 백업 전용 폴더를 만들고 주소창에서 폴더 ID를 복사한 뒤, [gdrive.py](file:///c:/Users/User/Desktop/work/template/auto/backup-tool/app/gdrive.py) 파일 상단의 `FOLDER_ID` 상수에 입력합니다.
+   - 코드를 수정할 필요 없이, 앱의 **구글 드라이브 연동** 영역에서 **"업로드 폴더 선택"** 버튼을 눌러 내 드라이브의 폴더를 탐색하며 업로드 대상 폴더를 고릅니다.
+   - 선택한 폴더는 `config.json`에 저장되어 다음 실행 시 그대로 유지됩니다. 지정하지 않으면 **내 드라이브 최상위**에 업로드됩니다.
 
 > [!WARNING]
 > `oauth_client.json` 및 `token.json` 파일에는 민감한 API 비밀키와 구글 드라이브 접근 토큰이 포함되어 있으므로 **절대로 GitHub 같은 공용 저장소에 커밋 및 업로드해서는 안 됩니다**. 본 프로젝트는 Git 설정 시 해당 폴더가 무시되도록 처리되어 있습니다.

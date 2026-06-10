@@ -30,6 +30,10 @@ class BackupConfig:
     includes: list[str] = field(default_factory=list)
     theme: str = "dark"
     gdrive_enabled: bool = False
+    # 구글 드라이브 업로드 대상 폴더. id 가 비어 있으면 '내 드라이브' 루트를 쓴다.
+    # path 는 표시용 경로 문자열(예: "내 드라이브/백업/work").
+    gdrive_folder_id: str = ""
+    gdrive_folder_path: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -39,6 +43,8 @@ class BackupConfig:
             "includes": list(self.includes),
             "theme": self.theme,
             "gdrive_enabled": self.gdrive_enabled,
+            "gdrive_folder_id": self.gdrive_folder_id,
+            "gdrive_folder_path": self.gdrive_folder_path,
         }
 
     @classmethod
@@ -53,8 +59,12 @@ class BackupConfig:
             includes = data.get("includes", [])
             theme = data.get("theme", "dark")
             gdrive_enabled = bool(data.get("gdrive_enabled", False))
+            gdrive_folder_id = data.get("gdrive_folder_id", "")
+            gdrive_folder_path = data.get("gdrive_folder_path", "")
             if not isinstance(source_dir, str) or not isinstance(backup_dir, str):
                 raise ConfigError("설정 파일의 경로 항목이 문자열이 아닙니다.")
+            if not isinstance(gdrive_folder_id, str) or not isinstance(gdrive_folder_path, str):
+                raise ConfigError("설정 파일의 구글 드라이브 폴더 항목이 문자열이 아닙니다.")
             if not isinstance(excludes, list) or not all(isinstance(x, str) for x in excludes):
                 raise ConfigError("설정 파일의 제외 목록(excludes) 형식이 올바르지 않습니다.")
             if not isinstance(includes, list) or not all(isinstance(x, str) for x in includes):
@@ -72,6 +82,8 @@ class BackupConfig:
             includes=includes,
             theme=theme,
             gdrive_enabled=gdrive_enabled,
+            gdrive_folder_id=gdrive_folder_id,
+            gdrive_folder_path=gdrive_folder_path,
         )
 
 

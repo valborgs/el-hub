@@ -31,7 +31,9 @@ SCOPES = [
     'https://www.googleapis.com/auth/spreadsheets',
 ]
 
-FOLDER_ID = "1twIsp5ZzVEpt-pArdT0kC6TjyobOImSi"
+# '내 드라이브' 루트를 가리키는 Drive API 별칭. 업로드 대상 폴더가
+# 지정되지 않았을 때의 기본 부모 폴더로 쓴다.
+ROOT_FOLDER_ID = "root"
 
 _service = None
 
@@ -98,6 +100,36 @@ def list_files_in_folder(folder_id, log_cb: LogCallback | None = None,
         _emit(error_cb, f"API 호출 중 오류가 발생했습니다: {e}")
 
 
+def list_subfolders(parent_id=ROOT_FOLDER_ID):
+    """parent_id 하위의 (휴지통이 아닌) 폴더 목록을 [(id, name), ...] 로 반환한다.
+
+    폴더 선택 대화상자가 Drive 트리를 탐색할 때 사용한다. parent_id 를
+    'root' 로 주면 '내 드라이브' 최상위의 폴더들을 돌려준다.
+    """
+    service = _get_service()
+    query = (
+        f"'{parent_id}' in parents"
+        f" and mimeType = 'application/vnd.google-apps.folder'"
+        f" and trashed = false"
+    )
+    folders: list[tuple[str, str]] = []
+    page_token = None
+    while True:
+        results = service.files().list(
+            q=query,
+            pageSize=100,
+            fields="nextPageToken, files(id, name)",
+            orderBy="name",
+            pageToken=page_token,
+        ).execute()
+        for f in results.get('files', []):
+            folders.append((f['id'], f['name']))
+        page_token = results.get('nextPageToken')
+        if not page_token:
+            break
+    return folders
+
+
 def _get_or_create_drive_folder(name, parent_id):
     service = _get_service()
     query = (
@@ -141,7 +173,7 @@ def _upload_file(local_path, parent_id):
         service.files().create(body=metadata, media_body=media, fields='id').execute()
 
 
-def upload_files(local_root, relative_paths, parent_folder_id=FOLDER_ID,
+def upload_files(local_root, relative_paths, parent_folder_id=ROOT_FOLDER_ID,
                  log_cb: LogCallback | None = None,
                  error_cb: ErrorCallback | None = None):
     """local_root 아래의 지정된 파일들만 Drive 에 업로드한다."""
@@ -173,7 +205,7 @@ def upload_files(local_root, relative_paths, parent_folder_id=FOLDER_ID,
     return failed
 
 
-def upload_folder(local_folder_path, parent_folder_id=FOLDER_ID,
+def upload_folder(local_folder_path, parent_folder_id=ROOT_FOLDER_ID,
                   log_cb: LogCallback | None = None,
                   error_cb: ErrorCallback | None = None):
     """로컬 폴더를 Drive의 parent_folder_id 아래에 재귀적으로 업로드합니다."""

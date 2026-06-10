@@ -1,14 +1,16 @@
 {
   "source_dir": "C:/Users/User/Desktop/work",
-  "backup_dir": "D:/백업/test",
+  "backup_dir": "D:/backup",
   "excludes": [
     "backup-tool",
     "auto",
-    "complete"
+    "complete",
+    "*.pdf",
+    "template"
   ],
-  "includes": [
-    "0.디지털파일_매크로.xlsm"
-  ],
+  "includes": [],
   "theme": "light",
-  "gdrive_enabled": false
+  "gdrive_enabled": true,
+  "gdrive_folder_id": "12PtLTznhRY7AVfBKD8qPikT-PeZln9r7",
+  "gdrive_folder_path": "내 드라이브/데이터클립_오류체크리스트/work"
 }
