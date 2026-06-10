@@ -745,21 +745,22 @@ def compute_last_row(ws1) -> int:
             last = r
     return last
 
-def merge_inputs_from_ws1_ws2(ws1, ws2) -> List[Dict]:
-    """1차 점검(ws1)과 2차 점검(ws2)의 raw 입력을 제어번호(B열) 기준으로 메모리상에서
-    병합하여 리스트로 반환한다. 시트에는 아무것도 쓰지 않는다.
+def merge_inputs_from_ws1_ws2_ws4(ws1, ws2, ws4) -> List[Dict]:
+    """1차 점검(ws1)·2차 점검(ws2)·품질점검(ws4)의 raw 입력을 제어번호(B열) 기준으로
+    메모리상에서 병합하여 리스트로 반환한다. 시트에는 아무것도 쓰지 않는다.
 
     반환: [{"a_to_k": [v1..v11], "err": [str,...], "page": [str,...], "fix": [str,...]}, ...]
 
-    - ws1 등장 순서를 앞에 두고, 이후 ws2-only 제어번호를 뒤에 이어붙임
-    - A~K열은 두 시트 모두 동일 내용이라는 전제 하에 첫 등장 행의 값을 캡처
-    - L/M/N은 두 시트의 모든 행에서 split_lines로 분리해 누적
+    - ws1 등장 순서를 앞에 두고, 이후 ws2-only, ws4-only 제어번호를 차례로 이어붙임
+    - A~K열은 세 시트 모두 동일 내용이라는 전제 하에 첫 등장 행의 값을 캡처
+    - L/M/N은 세 시트의 모든 행에서 split_lines로 분리해 누적
     - 같은 제어번호가 비인접/여러 행에 분산되어도 모두 한 그룹으로 합쳐짐
     - 제어번호가 비어 있는 행은 절대 다른 행과 병합되지 않음(고유키 사용)
     - 완전 빈 행(B/L/M/N 모두 비어있음)은 무시
     """
     last_row_1 = compute_last_row(ws1)
     last_row_2 = compute_last_row(ws2)
+    last_row_4 = compute_last_row(ws4)
 
     groups: Dict[object, Dict] = {}
 
@@ -792,6 +793,7 @@ def merge_inputs_from_ws1_ws2(ws1, ws2) -> List[Dict]:
 
     absorb(ws1, last_row_1, 1)
     absorb(ws2, last_row_2, 2)
+    absorb(ws4, last_row_4, 4)
 
     return list(groups.values())
 
@@ -835,8 +837,8 @@ def process_error_list(src_path: str, on_progress=None) -> Dict:
 
     ws1, ws2, ws3, ws4 = [wb[s] for s in SHEETS]
 
-    progress(10, "1차·2차 시트 데이터 병합 중")
-    merged = merge_inputs_from_ws1_ws2(ws1, ws2)
+    progress(10, "1차·2차·품질점검 시트 데이터 병합 중")
+    merged = merge_inputs_from_ws1_ws2_ws4(ws1, ws2, ws4)
     total_rows = len(merged)
 
     if total_rows == 0:
