@@ -21,3 +21,5 @@ class WorkerSignals(QObject):
     path_backed_up = Signal(str)
     # 초기 동기화 종료: (성공 건수, 실패 건수, 치명적 오류 메시지 또는 빈 문자열)
     sync_finished = Signal(int, int, str)
+    # 구글 드라이브 로그인 종료: (성공 여부, 이메일 또는 오류 메시지)
+    gdrive_login_finished = Signal(bool, str)

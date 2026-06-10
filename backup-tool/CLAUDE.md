@@ -26,7 +26,7 @@ Optionally mirrors the local backup to Google Drive on a 1-hour cadence, uploadi
 | `app/errors.py` | Exception hierarchy (`BackupError`, `ConfigError`, `ValidationError`, `SyncError`) |
 | `app/backup_engine.py` | `copy_file`, `initial_sync`, exclusion filtering, emits `path_cb` on each successful copy |
 | `app/watcher.py` | `WatcherService` — wraps `watchdog.Observer` for real-time monitoring, emits `path_cb` on each successful copy |
-| `app/gdrive.py` | OAuth user-account login (desktop flow), `upload_files` for change-set uploads, `upload_folder` for full-folder uploads, login/logout/token persistence |
+| `app/gdrive.py` | Drive upload (`upload_files` for change-set, `upload_folder` for full-folder, `list_subfolders` for the folder picker). Auth (login/token) is **delegated to the shared `hub_auth` module** — see below |
 | `app/logger.py` | `SessionLogger` — daily rotating log files under `log/` |
 | `app/ui/signals.py` | `WorkerSignals` — Qt signals bridging background threads → main thread |
 | `app/ui/main_window.py` | Full PySide6 UI, state machine, system tray, Google Drive integration |
@@ -35,7 +35,7 @@ Optionally mirrors the local backup to Google Drive on a 1-hour cadence, uploadi
 
 ```
 MainWindow loads config.json
-  → if credentials/token.json exists: toggle ON, fetch email in background
+  → if gdrive_enabled and token.json exists: restore toggle ON + show upload-folder picker (no network)
   → User clicks "감시 시작"
   → validate() + save config.json
   → clear pending Drive upload queue
@@ -61,15 +61,13 @@ Signals currently defined:
 - `backup(str)` — one-line backup event message (e.g. `"수정: 문서/보고서.docx"`)
 - `path_backed_up(str)` — absolute path of a file that was backed up; consumed to populate the Drive upload queue
 - `sync_finished(int, int, str)` — `(success, failed, fatal_msg_or_empty)`
-- `gdrive_login_finished(bool, str)` — `(success, email_or_error)`
-- `gdrive_logout_finished(bool, str)` — `(success, error_msg)`
+- `gdrive_login_finished(bool, str)` — `(success, email_or_error)`; emitted by the toggle-ON login worker
 
 ### Google Drive integration
 
 - Authentication uses **OAuth desktop flow** (personal Gmail). Service accounts are not used (they have no storage quota).
-- `credentials/oauth_client.json` — user-provided OAuth client (download from Google Cloud Console → "Desktop app").
-- `credentials/token.json` — auto-generated after first consent; cached and auto-refreshed.
-- Toggle state mirrors token presence: turning the toggle ON triggers the OAuth flow; turning it OFF revokes the token and deletes `token.json`.
+- **Auth is delegated to the shared `hub_auth` module** (`auto/hub_auth.py`), the hub's standalone login module — reused by the hub, scrape app, and this backup tool so they share one Google session. `app/gdrive.py` lazy-loads it from `parents[2]/hub_auth.py` via `importlib` (`_auth()`), then delegates `is_logged_in`/`login`/`get_email`/`cancel_login`/`get_credentials`. `hub_auth` owns `oauth_client.json`/`token.json` under `auto/credentials/` (shared, auto-refreshed).
+- Toggle ON runs `_gdrive_login_worker` on a background thread: it calls `gdrive.get_email()` to validate the cached token, and on `PermissionError` (missing/expired/revoked) falls back to `gdrive.login()` which runs the hub OAuth flow (opens a browser; cancelable via the modal `QProgressDialog` → `gdrive.cancel_login()`). Result returns on `gdrive_login_finished`. On success the **upload-folder picker (button+label) becomes visible**; on failure/cancel the toggle reverts to OFF. Toggle OFF hides the picker and stops the timer (it does **not** revoke the token — logout is the hub's job).
 - The 1-hour timer (`QTimer`, `_GDRIVE_INTERVAL_MS = 60 * 60 * 1000`) starts after `_on_sync_finished` succeeds and fires `_run_gdrive_upload` immediately + every hour.
 - `_run_gdrive_upload` snapshots `_gdrive_pending` (set of absolute backup file paths), clears it, converts to paths relative to `backup_dir`, and hands them to `gdrive.upload_files`. Failed paths are re-emitted via `path_backed_up` for retry next cycle.
 - The upload **target folder** is user-chosen (not hardcoded): the Drive group's "업로드 폴더 선택" button opens `_GDriveFolderDialog`, which browses the Drive tree via `gdrive.list_subfolders` (lazy, background-threaded with a generation guard). The choice is persisted to `config.json` as `gdrive_folder_id` / `gdrive_folder_path` and passed to `upload_files(parent_folder_id=...)`. An empty id falls back to `gdrive.ROOT_FOLDER_ID` ("root" = My Drive).

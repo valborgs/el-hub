@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPlainTextEdit,
+    QProgressDialog,
     QPushButton,
     QStyle,
     QSystemTrayIcon,
@@ -277,6 +278,7 @@ class MainWindow(QWidget):
         self._signals.backup.connect(self._on_backup_event)
         self._signals.sync_finished.connect(self._on_sync_finished)
         self._signals.path_backed_up.connect(self._on_path_backed_up)
+        self._signals.gdrive_login_finished.connect(self._on_gdrive_login_finished)
         self._sync_thread: threading.Thread | None = None
 
         # 트레이 관련 상태
@@ -289,6 +291,10 @@ class MainWindow(QWidget):
         # 구글 드라이브 자동 업로드 상태
         self._gdrive_timer: QTimer | None = None
         self._gdrive_uploading = False
+        # 로그인/로그아웃 진행 중 가드 및 진행 다이얼로그 상태
+        self._gdrive_busy = False
+        self._gdrive_login_dialog: QProgressDialog | None = None
+        self._gdrive_login_cancelled = False
         # 다음 업로드 사이클에서 Drive 로 올릴 백업 파일들의 절대경로
         self._gdrive_pending: set[str] = set()
         # 업로드 대상 Drive 폴더 (id 가 비면 '내 드라이브' 루트)
@@ -432,6 +438,8 @@ class MainWindow(QWidget):
         gdrive_layout.addWidget(self._gdrive_folder_btn)
         gdrive_layout.addWidget(self._gdrive_folder_label)
         gdrive_layout.addStretch()
+        # 업로드 폴더 선택칸은 연동 토글이 켜졌을 때만 보인다.
+        self._set_gdrive_folder_visible(False)
 
         settings_row.addWidget(self._dir_group, stretch=1)
         settings_row.addWidget(self._gdrive_group)
@@ -611,6 +619,7 @@ class MainWindow(QWidget):
             self._gdrive_check.blockSignals(False)
             self._update_gdrive_icon(True)
             self._gdrive_status.setText("구글 드라이브 연동 활성화됨")
+            self._set_gdrive_folder_visible(True)
 
 
     def _collect_config(self) -> BackupConfig:
@@ -914,26 +923,142 @@ class MainWindow(QWidget):
         if icon_path.exists():
             self._gdrive_check.setIcon(QIcon(str(icon_path)))
 
+    def _set_gdrive_folder_visible(self, visible: bool) -> None:
+        """업로드 폴더 선택칸(버튼+라벨)을 보이거나 숨긴다."""
+        self._gdrive_folder_btn.setVisible(visible)
+        self._gdrive_folder_label.setVisible(visible)
+
     def _on_gdrive_toggled(self, checked: bool) -> None:
-        """토글 — 허브 토큰이 있으면 Drive 업로드 활성화, 없으면 즉시 되돌린다."""
-        from .. import gdrive
+        """토글 ON — 로그인 상태를 확인하고 필요하면 재로그인한 뒤 폴더칸을 연다.
+
+        토큰이 만료/무효(PermissionError)면 허브 로그인 흐름으로 재로그인을 시도한다.
+        실제 검증·로그인은 네트워크를 타므로 백그라운드 스레드에서 수행하고,
+        결과는 `_on_gdrive_login_finished`(메인 스레드)에서 처리한다.
+        """
+        if self._gdrive_busy:
+            return
         if checked:
-            if not gdrive.is_logged_in():
-                self._gdrive_check.blockSignals(True)
-                self._gdrive_check.setChecked(False)
-                self._gdrive_check.blockSignals(False)
-                self._update_gdrive_icon(False)  # 흑백 유지
-                self._gdrive_status.setText("허브에서 먼저 구글 계정으로 로그인해 주세요")
-                return
-            self._update_gdrive_icon(True)
-            self._gdrive_status.setText("구글 드라이브 연동 활성화됨")
-            if not self._source_edit.isEnabled():
-                self._start_gdrive_timer()
+            self._gdrive_busy = True
+            self._gdrive_login_cancelled = False
+            self._gdrive_check.setEnabled(False)
+            self._gdrive_status.setText("구글 드라이브 연결 확인 중...")
+            self._show_gdrive_login_dialog()
+            threading.Thread(target=self._gdrive_login_worker, daemon=True).start()
         else:
             self._update_gdrive_icon(False)
             self._gdrive_status.setText("")
+            self._set_gdrive_folder_visible(False)
             self._stop_gdrive_timer()
-        self._autosave_config()
+            self._autosave_config()
+
+    # ----------------------------------------------- 구글 드라이브 로그인 흐름
+    def _show_gdrive_login_dialog(self) -> None:
+        """로그인 진행 중 다른 조작을 막는 모달 진행 다이얼로그를 띄운다."""
+        dialog = QProgressDialog(self)
+        dialog.setWindowTitle("구글 드라이브 로그인")
+        dialog.setLabelText(
+            "구글 드라이브에 연결하는 중입니다.\n"
+            "로그인이 필요하면 브라우저 창이 열립니다."
+        )
+        dialog.setRange(0, 0)  # 인디터미넌트(busy) 진행바
+        dialog.setMinimumDuration(0)
+        dialog.setCancelButtonText("취소")
+        dialog.canceled.connect(self._on_gdrive_login_cancel)
+        dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+        dialog.setWindowFlags(
+            Qt.WindowType.Dialog
+            | Qt.WindowType.CustomizeWindowHint
+            | Qt.WindowType.WindowTitleHint
+        )
+        dialog.show()
+        self._gdrive_login_dialog = dialog
+
+    def _on_gdrive_login_cancel(self) -> None:
+        """다이얼로그의 '취소'/Esc — 진행 중인 OAuth 흐름을 중단하고 토글을 되돌린다."""
+        from .. import gdrive
+        self._gdrive_login_cancelled = True
+        self._gdrive_login_dialog = None  # canceled 직후 다이얼로그는 자동 close 된다
+        self._gdrive_busy = False
+        try:
+            gdrive.cancel_login()
+        except Exception:
+            pass
+        if self._source_edit.isEnabled():
+            self._gdrive_check.setEnabled(True)
+        self._gdrive_check.blockSignals(True)
+        self._gdrive_check.setChecked(False)
+        self._gdrive_check.blockSignals(False)
+        self._update_gdrive_icon(False)
+        self._set_gdrive_folder_visible(False)
+        self._gdrive_status.setText("")
+        self._append_log("구글 드라이브 로그인을 취소했습니다.")
+
+    def _close_gdrive_login_dialog(self) -> None:
+        """진행 다이얼로그를 프로그램적으로 닫는다.
+
+        QProgressDialog.close() 는 canceled 시그널을 발생시키므로, 먼저
+        취소 핸들러를 끊어 '사용자 취소'로 오인되지 않게 한다. (이 오인이
+        로그인 성공 후 토글을 몰래 해제해 OFF 클릭이 ON 으로 동작하던 원인.)
+        """
+        if self._gdrive_login_dialog is not None:
+            dlg = self._gdrive_login_dialog
+            self._gdrive_login_dialog = None
+            try:
+                dlg.canceled.disconnect(self._on_gdrive_login_cancel)
+            except (RuntimeError, TypeError):
+                pass
+            dlg.close()
+            dlg.deleteLater()
+
+    def _gdrive_login_worker(self) -> None:
+        """백그라운드: 기존 토큰을 검증하고, 만료/무효면 허브 로그인으로 재로그인한다."""
+        from .. import gdrive
+        try:
+            try:
+                email = gdrive.get_email()  # 기존 토큰 검증 (브라우저 없음)
+            except PermissionError:
+                email = gdrive.login()      # 토큰 만료/무효 → 허브 재로그인 (브라우저)
+            self._signals.gdrive_login_finished.emit(True, email)
+        except Exception as err:
+            self._signals.gdrive_login_finished.emit(False, str(err))
+
+    def _on_gdrive_login_finished(self, success: bool, message: str) -> None:
+        """로그인 결과(메인 스레드). 성공하면 폴더칸을 열고, 실패하면 토글을 되돌린다."""
+        # 사용자가 이미 취소했으면 늦게 끝난 결과는 무시한다.
+        if self._gdrive_login_cancelled:
+            self._gdrive_login_cancelled = False
+            return
+        self._gdrive_busy = False
+        self._close_gdrive_login_dialog()
+        if self._source_edit.isEnabled():
+            self._gdrive_check.setEnabled(True)
+
+        if success:
+            # 토글 내부 상태를 결과와 명시적으로 일치시킨다(시각/내부 desync 방지).
+            self._gdrive_check.blockSignals(True)
+            self._gdrive_check.setChecked(True)
+            self._gdrive_check.blockSignals(False)
+            self._update_gdrive_icon(True)
+            self._gdrive_status.setText(
+                f"로그인됨: {message}" if message else "구글 드라이브 연동 활성화됨"
+            )
+            self._set_gdrive_folder_visible(True)
+            self._append_log(
+                f"구글 드라이브 연동 활성화: {message}" if message
+                else "구글 드라이브 연동을 활성화했습니다."
+            )
+            self._autosave_config()
+            # 감시 중에 켠 경우라면 업로드 타이머도 시작한다.
+            if not self._source_edit.isEnabled():
+                self._start_gdrive_timer()
+        else:
+            self._gdrive_check.blockSignals(True)
+            self._gdrive_check.setChecked(False)
+            self._gdrive_check.blockSignals(False)
+            self._update_gdrive_icon(False)
+            self._set_gdrive_folder_visible(False)
+            self._gdrive_status.setText("")
+            self._append_error(f"구글 드라이브 로그인 실패: {message}")
 
     def _update_gdrive_folder_label(self) -> None:
         """선택된 업로드 폴더 경로를 라벨에 표시한다(미지정이면 루트)."""

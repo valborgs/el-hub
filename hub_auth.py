@@ -169,6 +169,15 @@ def get_email() -> str:
     return about.get('user', {}).get('emailAddress', '')
 
 
+def get_credentials() -> Credentials | None:
+    """캐시된(필요 시 자동 갱신된) 자격증명을 반환한다. 브라우저는 띄우지 않는다.
+
+    다른 앱이 이 모듈로 인증을 위임할 때, 직접 Drive/Sheets 서비스를 만들 수
+    있도록 Credentials 를 노출한다. 유효한 토큰이 없으면 None 을 반환한다.
+    """
+    return _try_cached_credentials()
+
+
 def logout() -> None:
     """저장된 토큰을 폐기하고 파일을 삭제한다. 폐기는 실패해도 무시한다."""
     if TOKEN_FILE.exists():

@@ -1,12 +1,9 @@
 import os
 import mimetypes
-import urllib.parse
-import urllib.request
+import importlib.util
 from pathlib import Path
 from typing import Callable
 
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
@@ -23,14 +20,6 @@ def _emit(cb, message: str) -> None:
         pass
 
 
-# 허브가 관리하는 공유 토큰 (auto/credentials/token.json)
-TOKEN_FILE = Path(__file__).resolve().parents[2] / 'credentials' / 'token.json'
-
-SCOPES = [
-    'https://www.googleapis.com/auth/drive',
-    'https://www.googleapis.com/auth/spreadsheets',
-]
-
 # '내 드라이브' 루트를 가리키는 Drive API 별칭. 업로드 대상 폴더가
 # 지정되지 않았을 때의 기본 부모 폴더로 쓴다.
 ROOT_FOLDER_ID = "root"
@@ -38,44 +27,70 @@ ROOT_FOLDER_ID = "root"
 _service = None
 
 
-def _try_cached_credentials():
-    """캐시된 토큰을 읽고, 필요 시 자동 갱신해서 반환한다. 브라우저는 띄우지 않는다."""
-    if not TOKEN_FILE.exists():
-        return None
-    try:
-        creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
-    except Exception:
-        return None
-
-    if creds and creds.valid:
-        return creds
-
-    if creds and creds.expired and creds.refresh_token:
-        try:
-            creds.refresh(Request())
-            TOKEN_FILE.write_text(creds.to_json(), encoding='utf-8')
-            return creds
-        except Exception:
-            return None
-
-    return None
+# 로그인·토큰 관리는 허브의 독립 인증 모듈(hub_auth)에 위임한다.
+# backup-tool 은 허브 루트(auto/) 아래에서 실행되므로 parents[2] 가 허브 루트다.
+# 다른 앱도 같은 hub_auth 모듈을 가져다 동일한 세션을 공유한다.
+_hub_auth = None
 
 
-def _get_service():
-    """Drive API 서비스 객체를 반환한다. 허브 토큰이 없으면 PermissionError."""
-    global _service
-    if _service is not None:
-        return _service
-    creds = _try_cached_credentials()
-    if creds is None:
-        raise PermissionError("구글 드라이브 토큰이 없습니다. 허브에서 로그인해 주세요.")
-    _service = build('drive', 'v3', credentials=creds)
-    return _service
+def _auth():
+    """허브 인증 모듈(hub_auth)을 지연 로딩해 반환한다.
+
+    모듈 임포트 시점에 실패하지 않도록, 처음 인증이 필요할 때 로드한다.
+    파일을 찾지 못하면 ImportError 를 던진다.
+    """
+    global _hub_auth
+    if _hub_auth is not None:
+        return _hub_auth
+    auth_path = Path(__file__).resolve().parents[2] / "hub_auth.py"
+    if not auth_path.exists():
+        raise ImportError(
+            f"허브 인증 모듈을 찾을 수 없습니다: {auth_path}\n"
+            "backup-tool 은 허브(auto/) 아래에서 실행되어야 합니다."
+        )
+    spec = importlib.util.spec_from_file_location("hub_auth", auth_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    _hub_auth = module
+    return module
 
 
 def is_logged_in() -> bool:
     """허브 토큰 파일이 존재하는지 검사한다 (네트워크 호출 없음)."""
-    return TOKEN_FILE.exists()
+    return _auth().is_logged_in()
+
+
+def login() -> str:
+    """허브 OAuth 로그인을 수행하고(필요 시 브라우저) 로그인된 이메일을 반환한다.
+
+    캐시된 토큰이 유효하면 브라우저 없이 즉시 이메일을 돌려준다.
+    """
+    global _service
+    email = _auth().login()
+    _service = None  # 새 자격증명으로 서비스 재생성을 유도
+    return email
+
+
+def get_email() -> str:
+    """캐시된 토큰만으로 현재 이메일을 반환한다(브라우저 없음). 무효면 PermissionError."""
+    return _auth().get_email()
+
+
+def cancel_login() -> None:
+    """진행 중인 허브 로그인 흐름을 취소한다."""
+    _auth().cancel_login()
+
+
+def _get_service():
+    """Drive API 서비스 객체를 반환한다. 유효한 토큰이 없으면 PermissionError."""
+    global _service
+    if _service is not None:
+        return _service
+    creds = _auth().get_credentials()
+    if creds is None:
+        raise PermissionError("구글 드라이브 토큰이 없습니다. 다시 로그인해 주세요.")
+    _service = build('drive', 'v3', credentials=creds)
+    return _service
 
 
 def list_files_in_folder(folder_id, log_cb: LogCallback | None = None,
