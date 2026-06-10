@@ -67,6 +67,13 @@ COL_FIX = 14           # N: 수정내역 (여러 줄, "이전 → 이후")
 MAX_PER_ERR_KIND = 5
 MAX_PER_ROW_TOTAL = 5   # 최종 분배 대상은 행당 최대 5개
 
+# 시트별 목표 분배 비율(전체 행 대비, "내용이 채워진 행 수" 기준).
+# 2·3·4차는 이 비율을 쿼터(상한)로 사용하고, 1차는 상한 없는 catch-all이다.
+#   - 1차: 항목이 있는 행이면 우선 채우고, 다른 시트 쿼터를 넘는 잉여 항목도 모두 흡수
+#   - 2·3·4차: 목표 대비 가장 뒤처진 시트부터 한 항목씩 채워 비율에 수렴
+#   - 3·4차는 ALLOWED_TYPES_LATE(오탈자/띄어쓰기) 항목만 받는 규칙 유지
+SHEET_TARGET_RATIO = {1: 0.80, 2: 0.40, 3: 0.20, 4: 0.10}
+
 # 중복 판단 기준 (유사도 임계값)
 SIMILARITY_THRESHOLD = 0.85  # 85% 이상 유사하면 중복으로 판단
 
@@ -866,6 +873,11 @@ def process_error_list(src_path: str, on_progress=None) -> Dict:
 
     progress(30, f"오류 항목 자동분류 및 분배 중 (총 {total_rows}행)")
 
+    # 시트별 누적 채움 카운터. 2·3·4차는 "행 위치 기준 페이스(SHEET_TARGET_RATIO × 진행
+    # 행수)"에 맞춰 분배하여 처음부터 마지막 행까지 고르게 분포시킨다. 1차는 상한 없는
+    # catch-all. (전체 상한을 쓰면 앞쪽 행이 쿼터를 모두 소진해 뒤쪽 행이 비는 현상 발생)
+    sheet_filled = {1: 0, 2: 0, 3: 0, 4: 0}
+
     for idx, mrow in enumerate(merged):
         r = DATA_START_ROW + idx
 
@@ -926,29 +938,51 @@ def process_error_list(src_path: str, on_progress=None) -> Dict:
         items_3: List[Dict] = []
         items_4: List[Dict] = []
 
-        take = min(1, len(capped))
-        items_1 = capped[:take]
-        rest = capped[take:]
+        # 쿼터 기반 분배(한 항목 = 한 시트, 행 수 기준 비율 수렴).
+        pool = list(capped)
+        late_bins = {2: items_2, 3: items_3, 4: items_4}
+        filled_this_row: set = set()
 
-        if rest:
-            items_2.append(rest[0])
-            rest = rest[1:]
+        # ① 1차 점검: 항목이 있으면 첫 항목을 우선 배정(주 점검 시트, 상한 없음).
+        if pool:
+            items_1.append(pool.pop(0))
+            sheet_filled[1] += 1
+            filled_this_row.add(1)
 
-        if rest:
-            idx_allow = next((i for i, it in enumerate(rest) if it["err"] in ALLOWED_TYPES_LATE), None)
-            if idx_allow is not None:
-                items_3.append(rest.pop(idx_allow))
+        # ② 2·3·4차: 행 위치 기준 페이스(SHEET_TARGET_RATIO × 진행 행수)에 따라 분배.
+        #    목표 페이스보다 뒤처진 시트부터 한 항목씩 채워, 마지막 행까지 고르게 분포시킨다.
+        #    각 시트는 이 행에서 최대 1회. 3·4차는 오탈자/띄어쓰기 항목만 받음.
+        pos = idx + 1  # 전체 데이터 행 중 현재 행의 1-based 위치
+        while pool:
+            best_s = None
+            best_deficit = None
+            for s in (2, 3, 4):
+                if s in filled_this_row:
+                    continue
+                paced_target = SHEET_TARGET_RATIO[s] * pos  # 이 위치까지의 목표 누적치
+                if sheet_filled[s] >= paced_target:
+                    continue  # 이미 페이스만큼 채움 → 이후 행을 위해 양보
+                if s in (3, 4) and not any(it["err"] in ALLOWED_TYPES_LATE for it in pool):
+                    continue
+                deficit = paced_target - sheet_filled[s]
+                if best_deficit is None or deficit > best_deficit:
+                    best_s, best_deficit = s, deficit
+            if best_s is None:
+                break
+            if best_s in (3, 4):
+                pick = next(i for i, it in enumerate(pool) if it["err"] in ALLOWED_TYPES_LATE)
             else:
-                items_2.extend(rest[:1])
-                rest = rest[1:]
+                pick = 0
+            late_bins[best_s].append(pool.pop(pick))
+            sheet_filled[best_s] += 1
+            filled_this_row.add(best_s)
 
-        if rest:
-            idx_allow = next((i for i, it in enumerate(rest) if it["err"] in ALLOWED_TYPES_LATE), None)
-            if idx_allow is not None:
-                items_4.append(rest.pop(idx_allow))
-            else:
-                items_2.extend(rest[:1])
-                rest = rest[1:]
+        # ③ 남은 잉여 항목은 모두 1차 점검으로(데이터 손실 없이 흡수).
+        if pool:
+            if 1 not in filled_this_row:
+                sheet_filled[1] += 1
+            items_1.extend(pool)
+            pool = []
 
         # L/M/N 값만 기록 (정렬 등 스타일은 마지막 일괄 적용 단계에서 처리)
         # 분배 이후 각 항목을 '/' 기준으로 펼쳐 L/M/N 줄 수를 일치시킨다.
@@ -1035,10 +1069,10 @@ def main():
         print()
         print("🔸 분류 결과:")
         print("  - 중복 제거: 85% 이상 유사한 항목 자동 제거")
-        print("  - 1차 점검: 각 행당 최대 2개 항목")
-        print("  - 2차 점검: 나머지 항목들")
-        print("  - 3차 점검: 오탈자/띄어쓰기 우선 1개")
-        print("  - 품질 점검: 오탈자/띄어쓰기 우선 1개")
+        print(f"  - 1차 점검: 주 점검 + 잉여 항목 흡수 (상한 없음)")
+        print(f"  - 2차 점검: 목표 약 {int(SHEET_TARGET_RATIO[2]*100)}% 행 (쿼터)")
+        print(f"  - 3차 점검: 목표 약 {int(SHEET_TARGET_RATIO[3]*100)}% 행 (오탈자/띄어쓰기만)")
+        print(f"  - 품질 점검: 목표 약 {int(SHEET_TARGET_RATIO[4]*100)}% 행 (오탈자/띄어쓰기만)")
         print("  - 행 높이: 8행부터 자동 맞춤 적용")
         print("  - 테두리: 8행부터 O열까지 모든 셀에 적용")
         print("=" * 60)
