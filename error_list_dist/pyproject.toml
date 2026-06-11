@@ -1,0 +1,15 @@
+[project]
+name = "error_list_dist"
+version = "0.1.0"
+description = "엑셀 오류리스트 자동 분류 · 분배 GUI"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "openpyxl>=3.1.5",
+    "pyside6>=6.11.0",
+    "markdown>=3.10.2",
+    "pyinstaller>=6.20.0",
+]
+
+[project.scripts]
+gui = "gui.app:main"
