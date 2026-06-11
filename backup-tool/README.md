@@ -81,8 +81,8 @@ backup-tool/
 ├── config.json          # UI 설정 저장 파일 (소스/백업 경로, 제외 패턴 등)
 ├── todo.txt             # 향후 개선 항목 목록
 ├── credentials/         # 인증 키 보관 폴더
-│   ├── oauth_client.json # [사용자 직접 배치] Google Cloud OAuth 클라이언트 JSON 키
-│   └── token.json       # [자동 생성] 사용자 로그인 완료 시 생성되는 OAuth 토큰
+│   └── oauth_client.json # [사용자 직접 배치] Google Cloud OAuth 클라이언트 JSON 키
+│                         # (로그인 토큰은 파일이 아니라 Windows 자격 증명 관리자에 DPAPI 암호화 저장)
 ├── log/                 # 일자별 동작 로그 폴더
 └── app/
     ├── errors.py        # 커스텀 예외 정의 클래스
@@ -135,12 +135,12 @@ python main.py
    - 선택한 폴더는 `config.json`에 저장되어 다음 실행 시 그대로 유지됩니다. 지정하지 않으면 **내 드라이브 최상위**에 업로드됩니다.
 
 > [!WARNING]
-> `oauth_client.json` 및 `token.json` 파일에는 민감한 API 비밀키와 구글 드라이브 접근 토큰이 포함되어 있으므로 **절대로 GitHub 같은 공용 저장소에 커밋 및 업로드해서는 안 됩니다**. 본 프로젝트는 Git 설정 시 해당 폴더가 무시되도록 처리되어 있습니다.
+> `oauth_client.json` 파일에는 민감한 API 비밀키가 포함되어 있으므로 **절대로 GitHub 같은 공용 저장소에 커밋 및 업로드해서는 안 됩니다**. 본 프로젝트는 Git 설정 시 해당 폴더가 무시되도록 처리되어 있습니다. 로그인 토큰은 파일이 아니라 Windows 자격 증명 관리자에 DPAPI로 암호화되어 저장됩니다.
 
 ### 연동 동작
 - UI에서 구글 드라이브 토글을 켜면 웹 브라우저가 열리며 Google 로그인이 시작됩니다. 
-- 한 번 승인되면 `credentials/token.json`이 자동 생성되어 다음 실행 시 로그인 단계를 건너뛰고 자동으로 연결됩니다.
-- 토글을 끄면 로컬 토큰 파일이 삭제되고 토큰 만료 요청이 Google 서버로 전송됩니다.
+- 한 번 승인되면 OAuth 토큰이 Windows 자격 증명 관리자에 암호화 저장되어 다음 실행 시 로그인 단계를 건너뛰고 자동으로 연결됩니다.
+- 토글을 끄면 자격 증명 관리자의 토큰이 삭제되고 토큰 만료 요청이 Google 서버로 전송됩니다.
 
 ---
 

@@ -24,7 +24,6 @@ scrape_distr_pipeline/scrape_core.py  ── 1단계: 구글 시트 스크래핑
 import json
 import re
 from datetime import date
-from pathlib import Path
 from typing import Callable, Dict, List, Tuple
 
 import gspread
@@ -33,18 +32,35 @@ from gspread.exceptions import APIError, WorksheetNotFound
 
 from common.constants import GROUPS
 from common.utils import default_log_callback, get_val, normalize_error_type, parse_fix_text, split_lines, split_fix_lines
+from core import secure_token
 
 
 # ---------------------------------------------------------------------------
 # 상수 (scrape_core 전용)
 # ---------------------------------------------------------------------------
 
-# 허브 공유 토큰: hub.py 와 같은 auto/ 레벨의 credentials/token.json
-_HUB_TOKEN_FILE = Path(__file__).resolve().parents[2] / "credentials" / "token.json"
+# 허브 공유 토큰: hub 와 동일한 Windows 자격 증명 관리자 항목(secure_token)을 공유한다.
 _OAUTH_SCOPES = [
     'https://www.googleapis.com/auth/drive',
     'https://www.googleapis.com/auth/spreadsheets',
 ]
+
+
+def _creds_to_min_json(creds) -> str:
+    """자격 증명 관리자 블롭 크기 제한 안에 들어가도록 최소 필드만 직렬화한다.
+
+    hub_auth._creds_to_min_json 과 동일한 필드를 저장해 두 앱이 호환된다.
+    """
+    info = {
+        "refresh_token": creds.refresh_token,
+        "client_id": creds.client_id,
+        "client_secret": creds.client_secret,
+        "token_uri": creds.token_uri,
+        "scopes": list(creds.scopes or _OAUTH_SCOPES),
+    }
+    if getattr(creds, "universe_domain", None):
+        info["universe_domain"] = creds.universe_domain
+    return json.dumps(info)
 
 
 # ---------------------------------------------------------------------------
@@ -73,21 +89,37 @@ def _authorize_client_oauth() -> gspread.Client:
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials as OAuthCreds
 
-    if not _HUB_TOKEN_FILE.exists():
+    raw = secure_token.load_token()
+    if not raw:
         raise ValueError(
             "허브 구글 로그인이 필요합니다. hub.py 에서 먼저 로그인해 주세요."
         )
     try:
-        creds = OAuthCreds.from_authorized_user_file(str(_HUB_TOKEN_FILE), _OAUTH_SCOPES)
+        creds = OAuthCreds.from_authorized_user_info(json.loads(raw), _OAUTH_SCOPES)
     except Exception as e:
-        raise ValueError(f"허브 토큰 파일 오류: {e}")
+        raise ValueError(f"허브 토큰 오류: {e}")
 
-    if creds.expired and creds.refresh_token:
+    # 최소 페이로드만 저장하므로 access token 이 없어 보통 valid 가 아니다 → refresh.
+    if not creds.valid and creds.refresh_token:
         try:
             creds.refresh(Request())
-            _HUB_TOKEN_FILE.write_text(creds.to_json(), encoding='utf-8')
-        except Exception as e:
-            raise ValueError(f"허브 토큰 갱신 실패: {e}")
+            # 회전(rotation)된 refresh_token 까지 반영하도록 항상 다시 저장.
+            secure_token.save_token(_creds_to_min_json(creds))
+        except Exception:
+            # 그 사이 다른 앱(hub 등)이 갱신해 둔 토큰이 있는지 한 번 더 확인 (동시성 방어).
+            raw2 = secure_token.load_token()
+            creds2 = None
+            if raw2 and raw2 != raw:
+                try:
+                    creds2 = OAuthCreds.from_authorized_user_info(json.loads(raw2), _OAUTH_SCOPES)
+                    if not creds2.valid and creds2.refresh_token:
+                        creds2.refresh(Request())
+                        secure_token.save_token(_creds_to_min_json(creds2))
+                except Exception:
+                    creds2 = None
+            if creds2 is None:
+                raise ValueError("허브 토큰 갱신 실패. hub.py 에서 다시 로그인해 주세요.")
+            creds = creds2
 
     return gspread.authorize(creds)
 
@@ -139,7 +171,7 @@ def _load_gsheet_data(gsheet_index: int, log_callback: Callable = None) -> pd.Da
     if not spreadsheet_url:
         raise ValueError("config.json의 SPREADSHEET_URL이 비어 있습니다. 구글 시트 URL을 입력하세요.")
 
-    if not _HUB_TOKEN_FILE.exists():
+    if not secure_token.has_token():
         log_callback("error", "❌ 구글 계정 로그인이 필요합니다. hub에서 먼저 로그인해 주세요.")
         raise ValueError("구글 계정 로그인이 필요합니다. hub에서 먼저 로그인해 주세요.")
 

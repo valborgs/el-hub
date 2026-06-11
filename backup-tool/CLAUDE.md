@@ -35,7 +35,7 @@ Optionally mirrors the local backup to Google Drive on a 1-hour cadence, uploadi
 
 ```
 MainWindow loads config.json
-  → if gdrive_enabled and token.json exists: restore toggle ON + show upload-folder picker (no network)
+  → if gdrive_enabled and a stored token exists (Credential Manager): restore toggle ON + show upload-folder picker (no network)
   → User clicks "감시 시작"
   → validate() + save config.json
   → clear pending Drive upload queue
@@ -66,7 +66,7 @@ Signals currently defined:
 ### Google Drive integration
 
 - Authentication uses **OAuth desktop flow** (personal Gmail). Service accounts are not used (they have no storage quota).
-- **Auth is delegated to the shared `hub_auth` module** (`auto/hub_auth.py`), the hub's standalone login module — reused by the hub, scrape app, and this backup tool so they share one Google session. `app/gdrive.py` lazy-loads it from `parents[2]/hub_auth.py` via `importlib` (`_auth()`), then delegates `is_logged_in`/`login`/`get_email`/`cancel_login`/`get_credentials`. `hub_auth` owns `oauth_client.json`/`token.json` under `auto/credentials/` (shared, auto-refreshed).
+- **Auth is delegated to the shared `hub_auth` module** (`auto/hub_auth.py`), the hub's standalone login module — reused by the hub, scrape app, and this backup tool so they share one Google session. `app/gdrive.py` lazy-loads it from `parents[2]/hub_auth.py` via `importlib` (`_auth()`), then delegates `is_logged_in`/`login`/`get_email`/`cancel_login`/`get_credentials`. `hub_auth` reads `oauth_client.json` under `auto/credentials/` and stores the OAuth token **DPAPI-encrypted in the Windows Credential Manager** (service `AutoHub-GoogleOAuth`) via `secure_store.py` — shared across apps, auto-refreshed; no plaintext token file.
 - Toggle ON runs `_gdrive_login_worker` on a background thread: it calls `gdrive.get_email()` to validate the cached token, and on `PermissionError` (missing/expired/revoked) falls back to `gdrive.login()` which runs the hub OAuth flow (opens a browser; cancelable via the modal `QProgressDialog` → `gdrive.cancel_login()`). Result returns on `gdrive_login_finished`. On success the **upload-folder picker (button+label) becomes visible**; on failure/cancel the toggle reverts to OFF. Toggle OFF hides the picker and stops the timer (it does **not** revoke the token — logout is the hub's job).
 - The 1-hour timer (`QTimer`, `_GDRIVE_INTERVAL_MS = 60 * 60 * 1000`) starts after `_on_sync_finished` succeeds and fires `_run_gdrive_upload` immediately + every hour.
 - `_run_gdrive_upload` snapshots `_gdrive_pending` (set of absolute backup file paths), clears it, converts to paths relative to `backup_dir`, and hands them to `gdrive.upload_files`. Failed paths are re-emitted via `path_backed_up` for retry next cycle.

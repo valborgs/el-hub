@@ -7,6 +7,8 @@ backup-tool 의 oauth_client.json / token.json 을 공유해
 
 from __future__ import annotations
 
+import importlib.util
+import json
 import os
 import threading
 import urllib.parse
@@ -22,8 +24,17 @@ from googleapiclient.discovery import build
 
 HERE = Path(__file__).parent
 
+# secure_store 는 이 파일과 같은 폴더(auto/)에 있다. backup-tool 등이 hub_auth 를
+# importlib 로 경로 로딩하면 auto/ 가 sys.path 에 없어 일반 import 가 실패하므로,
+# 항상 이 파일 위치 기준으로 직접 로드한다.
+_ss_spec = importlib.util.spec_from_file_location("secure_store", HERE / "secure_store.py")
+secure_store = importlib.util.module_from_spec(_ss_spec)
+_ss_spec.loader.exec_module(secure_store)
+
 CLIENT_SECRET_FILE = HERE / "credentials" / "oauth_client.json"
-TOKEN_FILE         = HERE / "credentials" / "token.json"
+# 과거 평문 토큰 파일. 토큰은 이제 자격 증명 관리자(secure_store)에 저장한다.
+# 잔존 평문 파일은 보안상 발견 시 제거한다.
+_LEGACY_TOKEN_FILE = HERE / "credentials" / "token.json"
 
 # drive: Drive 백업 + 파일 복사·삭제
 # spreadsheets: gspread 시트 읽기
@@ -36,32 +47,84 @@ SCOPES = [
 _cancel_event = threading.Event()
 
 
+def _creds_to_min_json(creds: Credentials) -> str:
+    """자격 증명 관리자 블롭 크기 제한(2560B) 안에 들어가도록 최소 필드만 직렬화한다.
+
+    access token / expiry 는 저장하지 않는다(refresh_token 으로 재발급 가능).
+    """
+    info = {
+        "refresh_token": creds.refresh_token,
+        "client_id": creds.client_id,
+        "client_secret": creds.client_secret,
+        "token_uri": creds.token_uri,
+        "scopes": list(creds.scopes or SCOPES),
+    }
+    if getattr(creds, "universe_domain", None):
+        info["universe_domain"] = creds.universe_domain
+    return json.dumps(info)
+
+
+def _cleanup_legacy_token_file() -> None:
+    """잔존 평문 토큰 파일이 있으면 best-effort 로 삭제한다."""
+    try:
+        if _LEGACY_TOKEN_FILE.exists():
+            _LEGACY_TOKEN_FILE.unlink()
+    except OSError:
+        pass
+
+
 def is_logged_in() -> bool:
-    """캐시된 토큰 파일이 존재하는지 검사한다 (네트워크 호출 없음)."""
-    return TOKEN_FILE.exists()
+    """저장된 토큰이 존재하는지 검사한다 (네트워크 호출 없음)."""
+    return secure_store.has_token()
 
 
-def _try_cached_credentials() -> Credentials | None:
-    """캐시된 토큰을 읽고, 필요 시 자동 갱신해서 반환한다. 브라우저는 띄우지 않는다."""
-    if not TOKEN_FILE.exists():
+def _load_creds() -> Credentials | None:
+    """자격 증명 관리자에서 토큰을 읽어 Credentials 로 복원한다."""
+    raw = secure_store.load_token()
+    if not raw:
         return None
     try:
-        creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+        return Credentials.from_authorized_user_info(json.loads(raw), SCOPES)
     except Exception:
         return None
 
-    if creds and creds.valid:
+
+def _try_cached_credentials() -> Credentials | None:
+    """캐시된 토큰을 읽고, 필요 시 자동 갱신해서 반환한다. 브라우저는 띄우지 않는다.
+
+    최소 페이로드만 저장하므로 access token 이 없어 보통 valid 가 아니다 → refresh 를 거친다.
+    refresh 성공 시 회전(rotation)된 refresh_token 까지 반영하도록 항상 다시 저장한다.
+    refresh 가 실패하면, 그 사이 다른 앱이 갱신해 둔 토큰이 있는지 자격 증명 관리자를
+    한 번 더 읽어 재시도한다(동시성 방어).
+    """
+    creds = _load_creds()
+    if creds is None:
+        return None
+
+    if creds.valid:
         return creds
 
-    if creds and creds.expired and creds.refresh_token:
-        try:
-            creds.refresh(Request())
-            TOKEN_FILE.write_text(creds.to_json(), encoding='utf-8')
-            return creds
-        except Exception:
-            return None
+    if not creds.refresh_token:
+        return None
 
-    return None
+    try:
+        creds.refresh(Request())
+        secure_store.save_token(_creds_to_min_json(creds))
+        return creds
+    except Exception:
+        # 다른 앱이 그 사이 토큰을 갱신/회전했을 수 있다 → 다시 읽어 재시도.
+        fresh = _load_creds()
+        if fresh is not None and fresh.refresh_token \
+                and fresh.refresh_token != creds.refresh_token:
+            try:
+                if fresh.valid:
+                    return fresh
+                fresh.refresh(Request())
+                secure_store.save_token(_creds_to_min_json(fresh))
+                return fresh
+            except Exception:
+                return None
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -133,8 +196,8 @@ def _run_oauth_flow() -> Credentials:
     os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
     flow.fetch_token(authorization_response=capture.redirect_uri)
     creds = flow.credentials
-    TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
-    TOKEN_FILE.write_text(creds.to_json(), encoding='utf-8')
+    secure_store.save_token(_creds_to_min_json(creds))
+    _cleanup_legacy_token_file()
     return creds
 
 
@@ -179,11 +242,13 @@ def get_credentials() -> Credentials | None:
 
 
 def logout() -> None:
-    """저장된 토큰을 폐기하고 파일을 삭제한다. 폐기는 실패해도 무시한다."""
-    if TOKEN_FILE.exists():
+    """저장된 토큰을 폐기하고 자격 증명 관리자에서 삭제한다. 폐기는 실패해도 무시한다."""
+    raw = secure_store.load_token()
+    if raw:
+        # access token 은 저장하지 않으므로 refresh_token 으로 폐기한다.
+        # 구글 revoke 엔드포인트는 access/refresh 토큰 모두 허용한다.
         try:
-            creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
-            token = getattr(creds, 'token', None)
+            token = json.loads(raw).get('refresh_token')
         except Exception:
             token = None
         if token:
@@ -197,7 +262,5 @@ def logout() -> None:
                 urllib.request.urlopen(req, timeout=5).read()
             except Exception:
                 pass
-        try:
-            TOKEN_FILE.unlink()
-        except OSError:
-            pass
+    secure_store.delete_token()
+    _cleanup_legacy_token_file()

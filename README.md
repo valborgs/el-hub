@@ -15,7 +15,7 @@ graph TD
     Launcher -->|1. Run & Status Monitoring| App3[오류항목 자동 분배: error_list_dist]
     
     Launcher -->|2. Common Google OAuth| Auth[Google OAuth Session: hub_auth.py]
-    Auth -->|Generates / Uses| Creds[(credentials/token.json)]
+    Auth -->|Generates / Uses| Creds[(Windows 자격 증명 관리자<br/>DPAPI 암호화 토큰)]
     Creds -.->|Read Session| App1
     Creds -.->|Read Session| App2
     
@@ -31,7 +31,7 @@ graph TD
 ### 1. 🎛️ 통합 허브 런처 (`hub.py` / `hub_auth.py`)
 하위 모든 도구를 일괄 실행하고 모니터링하는 중앙 관리자입니다.
 - **프로세스 감시 및 윈도우 포커싱**: 하위 앱들의 실행 상태를 모니터링하여 가동 중에는 "열기", 미실행 상태에는 "실행" 버튼을 동적으로 활성화합니다. 이미 실행된 앱의 버튼을 클릭할 경우 DWM(Desktop Window Manager) API를 이용해 해당 창을 최상위로 가져옵니다(Bring to Front).
-- **공유 구글 OAuth 세션**: `credentials/token.json`을 단일 경로로 공유해, 허브에서 한 번 로그인하면 `backup-tool`과 `scrape_dist_app`에서 추가 로그인 없이 연동 작업을 수행합니다.
+- **공유 구글 OAuth 세션**: OAuth 토큰을 DPAPI로 암호화해 Windows 자격 증명 관리자(`AutoHub-GoogleOAuth`)에 저장·공유하므로, 허브에서 한 번 로그인하면 `backup-tool`과 `scrape_dist_app`에서 추가 로그인 없이 연동 작업을 수행합니다.
 - **작업자 출퇴근 기록**: 로그인된 계정과 연동하여 작업 일시, 계정명, 출근/퇴근 상태를 `timesheet.txt`에 탭(`\t`)으로 구분하여 안전하게 누적 기록합니다.
 
 ### 2. 📂 실시간 폴더 백업 ([backup-tool](file:///c:/Users/User/Desktop/work/template/auto/backup-tool/README.md))

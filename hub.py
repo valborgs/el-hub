@@ -597,9 +597,17 @@ class HubWindow(QWidget):
         self._auth_busy = False
         self._login_cancelled = False
         self._current_email = ""
+        self._auth_logged_in = False  # 마지막으로 UI에 반영된 로그인 상태
         self._refresh_auth_ui(hub_auth.is_logged_in())
         if hub_auth.is_logged_in():
             threading.Thread(target=self._fetch_email_worker, daemon=True).start()
+
+        # 다른 프로세스(backup-tool 등)에서의 로그인/로그아웃을 감지해 허브 UI를 동기화한다.
+        # 토큰은 Windows 자격 증명 관리자에 공유되므로 is_logged_in() 으로 폴링한다(네트워크 없음).
+        self._auth_poll_timer = QTimer(self)
+        self._auth_poll_timer.setInterval(3000)
+        self._auth_poll_timer.timeout.connect(self._poll_auth_state)
+        self._auth_poll_timer.start()
 
         # 출퇴근 버튼 초기 상태: 오늘 마지막이 "출근"이면 "퇴근하기", 그 외엔 "출근하기"
         last_ts, last_action = self._read_last_record()
@@ -625,6 +633,7 @@ class HubWindow(QWidget):
     # ── 구글 계정 ────────────────────────────────────────────────────────────
 
     def _refresh_auth_ui(self, logged_in: bool, email: str = "") -> None:
+        self._auth_logged_in = logged_in
         self._dot_auth.set_running(logged_in)
         if logged_in and email:
             self._lbl_auth.setText(f"구글 계정: {email}")
@@ -641,6 +650,25 @@ class HubWindow(QWidget):
         else:
             self._btn_auth.setText("로그인")
         self._btn_auth.setEnabled(True)
+
+    def _poll_auth_state(self) -> None:
+        """자격 증명 관리자의 토큰 존재 여부를 주기적으로 확인해 외부 변경을 동기화한다.
+
+        backup-tool 에서 로그인하면 허브도 로그인 상태로, 로그아웃하면 로그아웃 상태로 반영한다.
+        허브 자체 로그인/로그아웃 진행 중(_auth_busy)에는 간섭하지 않는다.
+        """
+        if self._auth_busy:
+            return
+        current = hub_auth.is_logged_in()
+        if current == self._auth_logged_in:
+            return
+        if current:
+            # 외부에서 로그인됨 → "확인 중..." 표시 후 이메일 조회
+            self._refresh_auth_ui(True)
+            threading.Thread(target=self._fetch_email_worker, daemon=True).start()
+        else:
+            # 외부에서 로그아웃됨
+            self._refresh_auth_ui(False)
 
     def _on_auth_clicked(self) -> None:
         if self._auth_busy:
