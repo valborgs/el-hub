@@ -63,6 +63,7 @@ else:
     _WinMSG = None  # type: ignore[assignment,misc]
 
 from .. import config as config_module
+from .. import runtime_state
 from ..backup_engine import initial_sync
 from ..config import BackupConfig
 from ..errors import BackupError, ConfigError, SyncError, ValidationError
@@ -307,6 +308,15 @@ class MainWindow(QWidget):
         self._set_status_label("중지됨", False)
         self._build_tray()
         self._load_initial_config()
+        # 설정 복원 후 현재 상태를 런타임 파일에 기록한다(허브가 외부에서 읽음).
+        self._update_runtime_state()
+
+    def _update_runtime_state(self) -> None:
+        """현재 감시/구글 드라이브 연동 상태를 런타임 상태 파일에 반영한다."""
+        runtime_state.write(
+            watching=self._watcher.is_running,
+            gdrive_enabled=self._gdrive_check.isChecked(),
+        )
 
     def changeEvent(self, event) -> None:
         super().changeEvent(event)
@@ -817,6 +827,7 @@ class MainWindow(QWidget):
             self._tray_toggle.setEnabled(True)
         self._set_status_label("감시 중" if running else "중지됨", running)
         self._set_inputs_enabled(not running)
+        self._update_runtime_state()
         # 감시가 끝나면 이 세션의 로그 파일도 닫는다.
         if not running:
             self._logger.stop()
@@ -950,6 +961,7 @@ class MainWindow(QWidget):
             self._set_gdrive_folder_visible(False)
             self._stop_gdrive_timer()
             self._autosave_config()
+            self._update_runtime_state()
 
     # ----------------------------------------------- 구글 드라이브 로그인 흐름
     def _show_gdrive_login_dialog(self) -> None:
@@ -1048,6 +1060,7 @@ class MainWindow(QWidget):
                 else "구글 드라이브 연동을 활성화했습니다."
             )
             self._autosave_config()
+            self._update_runtime_state()
             # 감시 중에 켠 경우라면 업로드 타이머도 시작한다.
             if not self._source_edit.isEnabled():
                 self._start_gdrive_timer()
@@ -1185,6 +1198,7 @@ class MainWindow(QWidget):
         except Exception:
             pass
         self._logger.stop()
+        runtime_state.clear()
         if self._tray is not None:
             self._tray.hide()
 

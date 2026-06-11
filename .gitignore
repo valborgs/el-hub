@@ -160,5 +160,8 @@ scrape_dist_app/credentials/
 # Temporary Office Files
 ~$*
 
+# 앱 런타임 상태 파일 (실행 중에만 존재하는 pid/상태 파일 — 허브가 실행여부 판별에 사용)
+runtime_state.json
+
 
 

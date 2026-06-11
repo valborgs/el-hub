@@ -11,10 +11,11 @@ from datetime import datetime
 from pathlib import Path
 
 import hub_auth
+import proc_state
 from PySide6.QtCore import QObject, QRectF, QTimer, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QIcon
 from PySide6.QtWidgets import (
-    QApplication, QFrame, QHBoxLayout, QLabel,
+    QApplication, QFrame, QHBoxLayout, QLabel, QMessageBox,
     QPushButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
 )
 
@@ -139,6 +140,12 @@ class AppCard(QFrame):
         self._proc: subprocess.Popen | None = None
         self._loading = False
         self._anim_frame = 0
+        self._running = False  # 카드가 현재 '실행 중'으로 표시되고 있는지
+        self._error = False    # 실행 실패 메시지 표시 중인지 (외부 감지로 덮지 않기 위함)
+        # 허브가 띄우지 않았지만 외부에서 켜진 인스턴스의 pid (없으면 None).
+        self._external_pid: int | None = None
+        # 각 앱이 시작 시 기록하는 실행 상태 파일 (proc_state.write/clear).
+        self._runtime_file = cwd / "runtime_state.json"
 
         # ── 레이아웃 ──
         root = QHBoxLayout(self)
@@ -190,17 +197,24 @@ class AppCard(QFrame):
         self._anim_timer.timeout.connect(self._tick_anim)
 
     def _on_btn_clicked(self) -> None:
+        # 허브가 띄운 프로세스든, 외부에서 켜진 인스턴스든 살아 있으면 그 창을 띄운다.
+        pid = None
         if self._proc and self._proc.poll() is None:
+            pid = self._proc.pid
+        elif self._external_pid is not None:
+            pid = self._external_pid
+        if pid is not None:
             restore_msg = (
                 _get_restore_msg(self._restore_msg_key)
                 if self._restore_msg_key and sys.platform == "win32"
                 else 0
             )
-            _focus_pid_window(self._proc.pid, restore_msg)
+            _focus_pid_window(pid, restore_msg)
         else:
             self._launch()
 
     def _launch(self) -> None:
+        self._error = False
         try:
             self._proc = subprocess.Popen(
                 self._cmd, cwd=str(self._cwd),
@@ -223,20 +237,34 @@ class AppCard(QFrame):
         self._btn.setText(_PROGRESS_FRAMES[self._anim_frame])
 
     def _poll(self) -> None:
-        if self._proc is None:
-            return
-        if self._proc.poll() is not None:
+        # 1) 허브가 직접 띄운 프로세스가 있으면 그 생사를 우선 확인한다.
+        if self._proc is not None:
+            if self._proc.poll() is None:
+                if self._loading and _has_visible_window(self._proc.pid):
+                    self._loading = False
+                    self._anim_timer.stop()
+                    self._set_running(True)
+                return
+            # 종료됨 — 외부 인스턴스 감지로 넘어간다.
             self._loading = False
             self._anim_timer.stop()
-            self._set_running(False)
             self._proc = None
-            return
-        if self._loading and _has_visible_window(self._proc.pid):
-            self._loading = False
-            self._anim_timer.stop()
-            self._set_running(True)
+        # 2) 허브가 띄우지 않았거나 종료된 경우: 외부에서 켜진 인스턴스를 감지한다.
+        self._detect_external()
+
+    def _detect_external(self) -> None:
+        """앱이 남긴 실행 상태 파일로 외부 인스턴스의 실행 여부를 반영한다."""
+        if self._error:
+            return  # 실행 실패 메시지는 다음 사용자 조작 전까지 유지한다.
+        state = proc_state.read_live(self._runtime_file)
+        pid = state.get("pid") if isinstance(state, dict) else None
+        self._external_pid = pid if isinstance(pid, int) else None
+        running = self._external_pid is not None
+        if running != self._running:
+            self._set_running(running)
 
     def _set_running(self, running: bool) -> None:
+        self._running = running
         self._dot.set_running(running)
         self._btn.setText("열기" if running else "실행")
         self._btn.setEnabled(True)
@@ -249,6 +277,8 @@ class AppCard(QFrame):
 
     def _set_error(self, msg: str) -> None:
         self._loading = False
+        self._error = True
+        self._running = False
         self._anim_timer.stop()
         self._dot.set_running(False)
         self._btn.setText("실행")
@@ -678,15 +708,35 @@ class HubWindow(QWidget):
             hub_auth.cancel_login()
             self._refresh_auth_ui(False)
             return
-        self._auth_busy = True
         if hub_auth.is_logged_in():
+            # 백업툴이 구글 드라이브 연동 중이면 로그아웃 전 확인을 받는다.
+            if self._is_gdrive_backup_active():
+                reply = QMessageBox.question(
+                    self, "로그아웃 확인",
+                    "현재 구글 드라이브 백업 연동중입니다. 로그아웃하시겠습니까?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
+            self._auth_busy = True
             self._btn_auth.setEnabled(False)
             threading.Thread(target=self._logout_worker, daemon=True).start()
         else:
+            self._auth_busy = True
             self._login_cancelled = False
             self._lbl_auth.setText("구글 계정: 로그인 중... (브라우저를 확인해 주세요)")
             self._btn_auth.setText("취소")  # _auth_busy=True이므로 직접 설정
             threading.Thread(target=self._login_worker, daemon=True).start()
+
+    def _is_gdrive_backup_active(self) -> bool:
+        """백업툴이 실행 중이고 구글 드라이브 연동(gdrive_enabled)이 켜져 있는지 확인한다.
+
+        허브가 직접 띄운 인스턴스든, 먼저 켜져 있던 외부 인스턴스든 동일하게
+        백업툴의 실행 상태 파일을 통해 판별한다. (pid + 생성시각으로 생존 검증)
+        """
+        state = proc_state.read_live(HERE / "backup-tool" / "runtime_state.json")
+        return bool(state and state.get("gdrive_enabled", False))
 
     def _login_worker(self) -> None:
         try:

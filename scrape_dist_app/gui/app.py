@@ -455,8 +455,32 @@ class PipelineApp(QWidget):
 # ---------------------------------------------------------------------------
 # 진입점
 # ---------------------------------------------------------------------------
+def _register_runtime_state():
+    """허브가 외부에서도 실행 여부를 알 수 있도록 실행 상태 파일을 남긴다.
+
+    허브 루트(auto/)의 proc_state 모듈에 위임한다. 종료 시 atexit 로 파일을 지운다.
+    프로젝트 구조나 모듈이 없어도 앱 실행에는 지장이 없도록 모든 실패를 무시한다.
+    """
+    try:
+        import atexit
+        import importlib.util
+        from pathlib import Path
+
+        app_dir = Path(__file__).resolve().parents[1]   # scrape_dist_app/
+        ps_path = app_dir.parent / "proc_state.py"      # auto/proc_state.py
+        spec = importlib.util.spec_from_file_location("proc_state", ps_path)
+        ps = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ps)
+        state_file = app_dir / "runtime_state.json"
+        ps.write(state_file)
+        atexit.register(lambda: ps.clear(state_file))
+    except Exception:
+        pass
+
+
 def main():
     app = QApplication(sys.argv)
+    _register_runtime_state()
     sans, mono = load_application_fonts()
     initial_theme = load_config().get("theme", "dark")
     apply_theme(app, initial_theme, sans, mono)
