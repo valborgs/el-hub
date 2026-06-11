@@ -2,132 +2,74 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Coding Guidelines
+## What this is
 
-### 1. Think Before Coding
-
-**Don't assume. Don't hide confusion. Surface tradeoffs.**
-
-Before implementing:
-- State your assumptions explicitly. If uncertain, ask.
-- If multiple interpretations exist, present them - don't pick silently.
-- If a simpler approach exists, say so. Push back when warranted.
-- If something is unclear, stop. Name what's confusing. Ask.
-
-### 2. Simplicity First
-
-**Minimum code that solves the problem. Nothing speculative.**
-
-- No features beyond what was asked.
-- No abstractions for single-use code.
-- No "flexibility" or "configurability" that wasn't requested.
-- No error handling for impossible scenarios.
-- If you write 200 lines and it could be 50, rewrite it.
-
-Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
-
-### 3. Surgical Changes
-
-**Touch only what you must. Clean up only your own mess.**
-
-When editing existing code:
-- Don't "improve" adjacent code, comments, or formatting.
-- Don't refactor things that aren't broken.
-- Match existing style, even if you'd do it differently.
-- If you notice unrelated dead code, mention it - don't delete it.
-
-When your changes create orphans:
-- Remove imports/variables/functions that YOUR changes made unused.
-- Don't remove pre-existing dead code unless asked.
-
-The test: Every changed line should trace directly to the user's request.
-
-### 4. Goal-Driven Execution
-
-**Define success criteria. Loop until verified.**
-
-Transform tasks into verifiable goals:
-- "Add validation" → "Write tests for invalid inputs, then make them pass"
-- "Fix the bug" → "Write a test that reproduces it, then make it pass"
-- "Refactor X" → "Ensure tests pass before and after"
-
-For multi-step tasks, state a brief plan:
-```
-1. [Step] → verify: [check]
-2. [Step] → verify: [check]
-3. [Step] → verify: [check]
-```
-
-## Overview
-
-구글 시트에서 오류항목을 스크래핑하여 엑셀 파일에 자동 분배·서식 적용하는 Python PySide6 GUI 데스크톱 앱.
+`scrape_dist_app` is one of the standalone tools in the `el-hub` workspace (see `../CLAUDE.md`). It scrapes error items from a Google Sheet, **auto-distributes** them into a copy of an Excel file across four review sheets, applies Rich Text diff highlighting and formatting, and saves a `_자동분류` output. PySide6 GUI; packaged as a separate exe (`dataclip`).
 
 ## Commands
 
 ```bash
-# 의존성 설치 (uv 사용)
-uv sync
+uv sync                                # install deps
+uv run python new_gui_app.py           # run GUI (also: uv run gui)
+uv run pyinstaller build.spec          # build the exe
 
-# GUI 앱 실행
-uv run python new_gui_app.py
-# 또는
-uv run gui
-
-# 파이프라인 단독 실행 (테스트)
-uv run python -c "
-import os; os.chdir(r'C:\...\scrape_dist_app')
-from common.pipeline import run_pipeline
-run_pipeline('파일.xlsx', gsheet_index=1, start_box='B0001', end_box='B0010')
-"
+# run the pipeline headless (must chdir to the package so config.json resolves):
+uv run python -c "import os; os.chdir(r'C:\\Users\\User\\Desktop\\work\\template\\auto\\scrape_dist_app'); \
+from common.pipeline import run_pipeline; \
+run_pipeline('파일.xlsx', gsheet_index=2, start_box='B0001', end_box='B0010', run_diff=False)"
 ```
 
-## Required Files
+No test suite or linter is configured.
 
-- `credentials/google_key.json` — Google 서비스 계정 키 (없으면 실행 불가)
-- `config.json` — `SPREADSHEET_URL`, `theme`, `run_diff` 저장; scrape_core가 cwd 기준으로 읽음
+## Authentication (changed — no more service-account key)
+
+Auth now uses the **shared hub Google OAuth token**, not a `google_key.json` service account. `core/secure_token.py` reads the DPAPI-encrypted token from Windows Credential Manager (service `AutoHub-GoogleOAuth`); `scrape_core` builds a `gspread` client from it and auto-refreshes/rotates the refresh token. **The user must log in via `hub.py` first** — with no stored token the pipeline raises immediately.
+
+`core/secure_token.py` is a **verbatim copy** of `../secure_store.py` (this app packages as its own exe and can't import the workspace root). The `_SERVICE` / `_ACCOUNT` / `_ENTROPY` constants must stay identical across both copies and `../hub_auth.py`, or the apps stop sharing the session.
+
+## Required config
+
+`config.json` (next to the exe / package root, read **cwd-relative**):
+
+| key | meaning |
+|-----|---------|
+| `SPREADSHEET_URL` | source Google Sheet URL (auto-created with defaults if missing) |
+| `theme` | `"dark"` or `"light"` |
+| `run_diff` | `true` → run stages 3 & 5 (diff highlight + XML patch); `false` → skip |
 
 ## Architecture
 
 ```
-new_gui_app.py              진입 shim → gui.app.main() 호출
-gui/                        실제 GUI 구현 패키지
-    app.py                  PySide6 메인 창 (PipelineApp) + main()
-    worker.py               PipelineWorker — QThread로 파이프라인 비동기 실행
-    config.py               config.json 로드/저장
-    paths.py                PROJECT_ROOT 등 경로 상수
-    theme.py                테마·색상 적용 (apply_theme, LOG_COLORS)
-    fonts.py                폰트 로드 (load_application_fonts)
-    dialogs.py              HelpDialog, SettingsDialog
-    utils.py                make_emoji_icon 등 GUI 유틸
-common/pipeline.py          파이프라인 통합 진입점 (5단계)
-common/pipeline_without_diff.py  diff 없이 3단계만 실행하는 대체 진입점
-common/constants.py         컬럼 매핑, GROUPS, 시트 이름 등 공유 상수
-common/utils.py             문자열 정규화, 줄 분할 등 공통 유틸
-common/logger.py            FileLogger — log/ 디렉터리에 실행 로그 기록
-core/scrape_core.py         1단계: gspread로 구글 시트 로드 → 박스 범위 추출 → 오류항목 파싱
-core/dist_core.py           2단계: 원본 엑셀 복사 → A~H 공통정보 기록 → L/M/N 시트 분배
-core/diff_core.py           3단계: N열 단일 항목 셀에 before/after Rich Text diff 강조 적용
-core/design_core.py         4단계: 테두리·폰트·정렬·행 높이 서식 일괄 적용
+new_gui_app.py              entry shim → gui.app.main()
+gui/                        PySide6 GUI shell (thin runner over the pipeline)
+    app.py                  PipelineApp window + main(); box-range inputs, sheet radios, _register_runtime_state()
+    worker.py               PipelineWorker (QThread) — chdir(PROJECT_ROOT) then run_pipeline
+    paths.py                PROJECT_ROOT + sys.path bootstrap (frozen-exe aware)
+    config.py palette.py style.py fonts.py dialogs.py utils.py   config·theme·fonts·dialogs
+common/pipeline.py          run_pipeline() — the 5-stage orchestrator
+common/pipeline_without_diff.py   3-stage variant (no diff/XML patch)
+common/constants.py         column mapping, GROUPS, sheet names, shared constants
+common/utils.py             string normalization, line splitting, parse_fix_text
+common/logger.py            FileLogger → log/
+core/scrape_core.py         stage 1: gspread load → box range → parse items
+core/dist_core.py           stage 2: copy Excel → write A~H → dedup/distribute → L/M/N
+core/diff_core.py           stage 3: Rich Text before/after diff on single-item N cells; stage 5 XML patch
+core/design_core.py         stage 4: borders/font/alignment/row-height (reloads rich_text=True to keep CellRichText)
+core/secure_token.py        shared OAuth token reader (copy of ../secure_store.py)
 ```
 
-### 데이터 흐름 (pipeline.py 기준)
+### Pipeline (`run_pipeline`, called on a worker thread)
 
-1. `scrape_core.run_scrape()` → `(rows_list, parsed_items_list)` 반환
-   - `rows_list`: A~H 공통정보 원본 행 데이터
-   - `parsed_items_list`: 행별 파싱된 오류항목 `List[Dict]` (`err`, `page`, `before`, `after`, `arrow`)
-2. `dist_core.run_distribute()` → `_자동분류{확장자}` 파일 경로 반환
-3. `diff_core.run_diff_highlight()` → N열 단일 항목 셀에 Rich Text diff 적용 (`run_diff=True` 시)
-4. `design_core.run_design()` → 동일 파일에 서식 인플레이스 적용
-5. `diff_core.patch_xml_space_preserve()` → openpyxl 3.1.5 버그 우회 XML 후처리 (`run_diff=True` 시)
+1. `scrape_core.run_scrape()` → `(rows_list, parsed_items_list)`. `rows_list` = A~H common-info rows; `parsed_items_list` = per-row `List[Dict]` (`err`, `page`, `before`, `after`, `arrow`). `gsheet_index`: 1=서울, 2=부산, 3=디파. It **copies** the source sheet server-side before reading.
+2. `dist_core.run_distribute()` → writes `_자동분류{ext}`, returns its path.
+3. `diff_core.run_diff_highlight()` — Rich Text diff on N-column single-item cells (only if `run_diff`).
+4. `design_core.run_design()` — bulk formatting, in place.
+5. `diff_core.patch_xml_space_preserve()` — works around an openpyxl 3.1.5 bug that drops `xml:space="preserve"` (only if `run_diff`).
 
-### config.json 키
+## Gotchas
 
-| 키 | 설명 |
-|----|------|
-| `SPREADSHEET_URL` | 구글 시트 URL |
-| `theme` | `"dark"` 또는 `"light"` |
-| `run_diff` | `true`이면 3·5단계 실행, `false`이면 스킵 |
+- **cwd dependency.** `scrape_core` reads `config.json` cwd-relative. The GUI worker does `os.chdir(PROJECT_ROOT)` (from `paths.py`) before running and restores cwd after; any headless/script call must `os.chdir()` to the package dir first or it won't find `config.json`/the token correctly.
+- **`paths.py` must import before `common.pipeline`.** `worker.py` imports `from .paths import PROJECT_ROOT` first so the `sys.path` bootstrap runs and `from common.pipeline import run_pipeline` resolves (in dev and in the bundle, where writable files sit beside the exe and read-only data under `_MEIPASS`).
+- **Hub integration.** `gui/app.main()` calls `_register_runtime_state()`, which `importlib`-loads `../proc_state.py` and writes `runtime_state.json` (cleared on exit via `atexit`) so the hub detects this app even when launched directly. All failures swallowed; runs fine standalone. `runtime_state.json` is gitignored.
 
-### cwd 의존성 주의
-
-`scrape_core._load_gsheet_data()`와 `_JSON_KEY_FILE`이 모두 **cwd 기준** 상대경로로 파일을 읽습니다. GUI는 `paths.py`의 `PROJECT_ROOT`로 cwd를 고정하지만, 스크립트로 직접 호출할 때는 `os.chdir()`로 패키지 디렉터리를 먼저 설정해야 합니다.
+> Note: `README.md` may describe the older service-account-key auth. Trust this file and the source — auth is via the shared hub login now.

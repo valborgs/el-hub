@@ -57,11 +57,13 @@ graph TD
 각 하위 폴더별로 독자적인 가상환경(`.venv`)을 갖추고 있을 경우, 허브가 가상환경 안의 Python 인터프리터를 탐지하여 우선적으로 실행합니다. 가상환경이 없으면 `uv run` 또는 글로벌 파이썬을 자동으로 찾아 폴백 실행합니다.
 
 ### 2. 패키지 설치
-최상위 폴더 및 각 하위 프로젝트의 라이브러리 의존성을 설치합니다.
+허브 런처(`hub.py`)는 자신을 실행하는 파이썬 인터프리터의 패키지를 그대로 사용합니다(별도 `requirements.txt` 없음). 해당 인터프리터에 다음 패키지가 설치되어 있어야 합니다.
 ```bash
-# 최상위 허브 의존성 설치
-pip install -r requirements.txt
+pip install PySide6 google-auth google-auth-oauthlib google-api-python-client keyring pywin32
 ```
+각 하위 프로젝트는 자체적으로 의존성을 관리합니다.
+- `backup-tool` : `pip install -r backup-tool/requirements.txt`
+- `scrape_dist_app`, `error_list_dist` : 각 폴더에서 `uv sync` (독자적인 `.venv` 생성)
 
 ### 3. 구글 클라우드 자격 증명 설정
 구글 드라이브 동기화 및 구글 시트 스크래핑을 사용하려면 OAuth API 설정이 필요합니다.
