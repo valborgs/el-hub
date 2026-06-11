@@ -7,9 +7,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-pip install -r requirements.txt   # PySide6, watchdog, google-*, keyring, pywin32
-python main.py                    # run the app
+uv sync                 # install deps into .venv (Python 3.14): PySide6, watchdog, google-*, keyring, pywin32
+uv run python main.py   # run the app
 ```
+
+This is an **independent uv project** (its own `pyproject.toml`/`uv.lock`/`.venv`), not part of a uv workspace. The hub launches it via its `.venv` interpreter like the other subapps.
 
 No build step, test suite, or linter is configured.
 

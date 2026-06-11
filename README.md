@@ -53,17 +53,18 @@ graph TD
 ## 🚀 시작하기
 
 ### 1. 사전 요구사항 (Prerequisites)
-본 프로젝트는 **Python 3.8 이상** 환경에서 구동됩니다.
-각 하위 폴더별로 독자적인 가상환경(`.venv`)을 갖추고 있을 경우, 허브가 가상환경 안의 Python 인터프리터를 탐지하여 우선적으로 실행합니다. 가상환경이 없으면 `uv run` 또는 글로벌 파이썬을 자동으로 찾아 폴백 실행합니다.
+본 프로젝트는 **[uv](https://docs.astral.sh/uv/)** 와 **Python 3.14** 환경에서 구동됩니다.
+허브와 3개 하위 프로젝트는 모두 각자 독립된 uv 프로젝트(`pyproject.toml`/`uv.lock`/`.venv`)이며, 단일 uv 워크스페이스로 묶여 있지는 않습니다. 허브는 각 하위 폴더의 `.venv` 안 Python 인터프리터를 탐지하여 우선 실행하고, 없으면 `uv run` 또는 글로벌 파이썬으로 폴백합니다.
 
 ### 2. 패키지 설치
-허브 런처(`hub.py`)는 자신을 실행하는 파이썬 인터프리터의 패키지를 그대로 사용합니다(별도 `requirements.txt` 없음). 해당 인터프리터에 다음 패키지가 설치되어 있어야 합니다.
+각 프로젝트 폴더에서 `uv sync` 를 실행하면 해당 폴더의 `.venv` 에 의존성이 설치됩니다.
 ```bash
-pip install PySide6 google-auth google-auth-oauthlib google-api-python-client keyring pywin32
+uv sync                          # 허브 (저장소 루트)
+uv sync --directory backup-tool
+uv sync --directory scrape_dist_app
+uv sync --directory error_list_dist
 ```
-각 하위 프로젝트는 자체적으로 의존성을 관리합니다.
-- `backup-tool` : `pip install -r backup-tool/requirements.txt`
-- `scrape_dist_app`, `error_list_dist` : 각 폴더에서 `uv sync` (독자적인 `.venv` 생성)
+허브 자체 의존성: `PySide6`, `google-auth`, `google-auth-oauthlib`, `google-api-python-client`, `keyring`, `pywin32`.
 
 ### 3. 구글 클라우드 자격 증명 설정
 구글 드라이브 동기화 및 구글 시트 스크래핑을 사용하려면 OAuth API 설정이 필요합니다.
@@ -75,7 +76,7 @@ pip install PySide6 google-auth google-auth-oauthlib google-api-python-client ke
 
 ### 4. 허브 실행
 ```bash
-python hub.py
+uv run python hub.py
 ```
 
 ---

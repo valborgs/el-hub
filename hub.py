@@ -522,7 +522,7 @@ class HubWindow(QWidget):
         subtitle.setStyleSheet(f"font-size: 12px; color: {P['text_muted']}; margin-bottom: 4px;")
         root.addWidget(subtitle)
 
-        backup_tool_cmd = [sys.executable, "main.py"]
+        backup_tool_cmd = _resolve_app_cmd("backup-tool", "main.py")
         scrape_cmd = _resolve_app_cmd("scrape_dist_app", "new_gui_app.py")
         error_list_cmd = _resolve_app_cmd("error_list_dist", "error_list_gui.py")
         dummy_cmd = [sys.executable, "-c", "pass"]

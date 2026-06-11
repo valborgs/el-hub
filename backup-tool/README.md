@@ -78,7 +78,7 @@ sequenceDiagram
 ```
 backup-tool/
 ├── main.py              # 애플리케이션 엔트리포인트 (Windows AppID, Exception Hook 등 설정)
-├── requirements.txt     # 의존성 패키지 명세
+├── pyproject.toml       # 의존성 패키지 명세 (uv)
 ├── config.json          # UI 설정 저장 파일 (소스/백업 경로, 제외 패턴 등)
 ├── todo.txt             # 향후 개선 항목 목록
 ├── credentials/         # 인증 키 보관 폴더
@@ -108,14 +108,14 @@ backup-tool/
 ## 🛠️ 설치 및 실행 방법
 
 ### 1. 의존성 패키지 설치
-Python 3.8 이상이 필요합니다. 터미널에서 다음 명령어를 실행하여 필요한 패키지를 설치합니다.
+[uv](https://docs.astral.sh/uv/) 와 Python 3.14 가 필요합니다. 터미널에서 다음 명령어를 실행하면 `.venv` 에 의존성이 설치됩니다.
 ```bash
-pip install -r requirements.txt
+uv sync
 ```
 
 ### 2. 애플리케이션 실행
 ```bash
-python main.py
+uv run python main.py
 ```
 
 ---

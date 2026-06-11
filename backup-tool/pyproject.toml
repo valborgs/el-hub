@@ -1,0 +1,15 @@
+[project]
+name = "backup-tool"
+version = "0.1.0"
+description = "실시간 폴더 백업 + Google Drive 동기화"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "watchdog>=4.0.0",
+    "pyside6>=6.6.0",
+    "google-api-python-client>=2.0.0",
+    "google-auth-oauthlib>=1.2.0",
+    "google-auth-httplib2>=0.2.0",
+    "keyring>=24.0.0",
+    "pywin32>=306",
+]

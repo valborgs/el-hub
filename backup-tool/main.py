@@ -73,7 +73,7 @@ def main() -> int:
         print(
             "PySide6 가 설치되어 있지 않습니다.\n"
             "다음 명령으로 의존성을 설치하세요:\n"
-            "    pip install -r requirements.txt",
+            "    uv sync",
             file=sys.stderr,
         )
         return 1

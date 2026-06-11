@@ -15,10 +15,11 @@ Each subproject has its **own** `CLAUDE.md`/`README.md` and its own dependency s
 ## Commands
 
 ```bash
-python hub.py        # run the launcher (from repo root)
+uv sync              # install hub deps into ./.venv (Python 3.14)
+uv run python hub.py # run the launcher (from repo root)
 ```
 
-There is **no build step, test suite, or linter**, and there is **no root `requirements.txt`** despite the README mentioning one. The hub depends on `PySide6`, `google-auth`, `google-auth-oauthlib`, `google-api-python-client`, `keyring`, and `pywin32`; these must be present in whatever interpreter runs `hub.py`. Subprojects manage their own deps (`backup-tool/requirements.txt`; `scrape_dist_app` and `error_list_dist` use `uv`/`pyproject.toml` + `.venv`).
+There is **no build step, test suite, or linter**. The whole workspace is now **uv-based and pinned to Python 3.14**: the hub has its own `pyproject.toml`/`uv.lock`/`.venv` at the repo root, and each subproject (`backup-tool`, `scrape_dist_app`, `error_list_dist`) is an **independent** uv project with its own `pyproject.toml`/`uv.lock`/`.venv`. There is intentionally **no uv workspace** — the four projects are resolved and locked separately, so run uv commands from each project's directory (or with `--directory`). The hub depends on `PySide6`, `google-auth`, `google-auth-oauthlib`, `google-api-python-client`, `keyring`, and `pywin32`.
 
 This is a **Windows-only** workspace in practice: process detection, window focusing, and token encryption all use Win32 APIs via `ctypes`/`pywin32`. Non-win32 branches exist as no-op fallbacks but the app is not exercised there.
 
@@ -37,7 +38,7 @@ This is a **Windows-only** workspace in practice: process detection, window focu
 
 An `AppCard` polls once per second. It treats an app as running if **either** the hub's own `subprocess.Popen` is alive **or** the app left a live `runtime_state.json`. The latter is how the hub detects instances it didn't launch (e.g. started directly). Clicking "열기" focuses the existing window via `_focus_pid_window` (enumerates the process tree, picks the largest Python top-level window, handles minimized/tray-hidden cases — tray restore is posted as a `RegisterWindowMessage` the app listens for, keyed by `restore_msg_key`).
 
-`_resolve_app_cmd` picks each subapp's interpreter: prefer its `.venv\Scripts\python.exe`, else `uv run python`, else the current interpreter. **Exception:** `backup-tool` is launched with `sys.executable` (the hub's own interpreter), so the hub's environment must satisfy backup-tool's imports too.
+`_resolve_app_cmd` picks each subapp's interpreter: prefer its `.venv\Scripts\python.exe`, else `uv run python`, else the current interpreter. All three subapps (including `backup-tool`) now go through this and run from their own `.venv`, so the hub's environment no longer needs to satisfy any subapp's imports.
 
 ### Shared OAuth session (the central design point)
 

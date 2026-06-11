@@ -1,0 +1,14 @@
+[project]
+name = "el-hub"
+version = "0.1.0"
+description = "점검 납품 도구 런처 (허브)"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "pyside6>=6.6.0",
+    "google-auth>=2.0.0",
+    "google-auth-oauthlib>=1.2.0",
+    "google-api-python-client>=2.0.0",
+    "keyring>=24.0.0",
+    "pywin32>=306",
+]
