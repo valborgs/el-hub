@@ -47,7 +47,7 @@ All apps share **one** Google login. The token is stored DPAPI-encrypted in Wind
 
 Two constraints that are easy to break:
 
-1. **`secure_store.py` constants are duplicated.** `scrape_dist_app` packages as a separate exe and keeps a copy of the same logic/constants at `scrape_dist_app/core/secure_token.py`. The `_SERVICE` / `_ACCOUNT` / `_ENTROPY` constants must be **identical** across both, or apps stop sharing the session. Change one → change the other.
+1. **`secure_store.py` is the single source for the token store.** `_SERVICE` / `_ACCOUNT` / `_ENTROPY` and the DPAPI crypto live only here; `hub_auth.py` and `scrape_dist_app/core/secure_token.py` both load this file by absolute path (`importlib`) — there is **no** duplicated copy anymore. Keep these constants here; don't fork them back into the subapp.
 
 2. **Subapps load these root modules by absolute path.** Because each app runs with its cwd in its own subdirectory (not the repo root), `auto/` is not on `sys.path`. So `backup-tool` etc. load `hub_auth`/`secure_store`/`proc_state` via `importlib.util.spec_from_file_location` against the file's real location — not a normal `import`. `hub_auth.py` itself loads `secure_store.py` the same way for the same reason. Don't convert these to plain imports.
 

@@ -6,9 +6,9 @@ base64 로 인코딩해 keyring 으로 Windows 자격 증명 관리자에 저장
 평문 파일(credentials/token.json) 대신 사용한다.
 
 세 앱(hub, backup-tool, scrape_dist_app)이 같은 _SERVICE / _ACCOUNT / _ENTROPY 로
-동일한 자격 증명 항목을 공유한다. scrape_dist_app 은 별도 exe 로 패키징되므로
-core/secure_token.py 에 이 파일과 동일한 상수·로직을 복제해 둔다. 셋 중 하나라도
-상수를 바꾸면 나머지도 반드시 함께 바꿔야 한다.
+동일한 자격 증명 항목을 공유한다. 이 파일이 **단일 소스**이며, hub_auth.py 와
+scrape_dist_app/core/secure_token.py 는 이 파일을 importlib 로 절대경로 로드해
+위임한다(복제본 없음). 상수는 여기서만 관리한다.
 """
 
 from __future__ import annotations
