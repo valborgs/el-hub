@@ -9,11 +9,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-uv sync                              # install deps (PySide6, openpyxl, markdown, pyinstaller)
+uv sync                              # install deps (PySide6, openpyxl, markdown)
 uv run python error_list_gui.py      # run GUI (also: uv run gui)
 uv run python error_list_auto_classify.py "오류리스트.xlsx"   # CLI on one file
-uv run pyinstaller error_list_gui.spec                       # build the exe
 ```
+
+This app is **run from source only** — there is no PyInstaller/exe build.
 
 No test suite or linter is configured. To exercise the engine directly without the GUI, call `process_error_list(src_path, on_progress=None)` from `error_list_auto_classify.py`.
 
@@ -26,7 +27,7 @@ error_list_gui.py        진입 shim → gui.app.main()
 gui/                      PySide6 GUI package
     app.py               ErrorListApp 창 + main(); lists cwd .xlsx, runs worker, opens result
     worker.py            ClassifyWorker (QThread) → wraps process_error_list, emits log/finished
-    paths.py             sys.path bootstrap (frozen-exe aware) — makes the engine importable
+    paths.py             sys.path bootstrap — makes the engine importable
     config.py            config.json load/save (only key: "theme")
     style.py palette.py fonts.py dialogs.py utils.py   thin shims over the shared `elhub_ui` design system (re-export/wrap with this app's FONT_DIR/CONFIG_FILE/README_PATH + app-specific QSS like `#file-list`); `gui/paths.py` adds the repo root to sys.path so `import elhub_ui` resolves. See `../CLAUDE.md` › "Shared design system". The collapsible log is `elhub_ui.components.LogPanel`.
 error_list_auto_classify.py   the whole classification/distribution/diff engine (CLI + process_error_list)
@@ -52,6 +53,6 @@ error_list_auto_classify.py   the whole classification/distribution/diff engine 
 - **Rich Text whitespace preservation.** openpyxl 3.1.5 drops `xml:space="preserve"` on runs that contain only whitespace, so Excel trims leading/trailing spaces and newlines. The engine works around this by never emitting a whitespace-only run: space-only diffs absorb a neighbor char (`append_diff_blocks`), and line breaks are prepended to the next non-empty run (`apply_rich_diff_for_bidir`). Preserve this when touching diff rendering.
 - **cwd-relative file listing.** The GUI lists `.xlsx` from `os.getcwd()` (excluding `~$*` temp files and `_자동분류` outputs). Output is always written next to the source file.
 - **Hub integration.** `main()` calls `_register_runtime_state()`, which `importlib`-loads `../proc_state.py` and writes `runtime_state.json` (cleared on exit via `atexit`) so the hub can detect this app even when launched directly. All failures there are swallowed — the app runs fine standalone. `runtime_state.json` is gitignored.
-- **`paths.py` must import before the engine.** `worker.py` imports `from . import paths` first so the `sys.path` bootstrap runs and `import error_list_auto_classify` resolves (both in dev and in the PyInstaller bundle, where writable files sit beside the exe and read-only data under `_MEIPASS`).
+- **`paths.py` must import before the engine.** `worker.py` imports `from . import paths` first so the `sys.path` bootstrap runs and `import error_list_auto_classify` resolves.
 
 > Note: `README.md` still describes a Tkinter GUI and a flat file structure; the GUI was rewritten to PySide6 under `gui/`. Trust this file and the source over that README.

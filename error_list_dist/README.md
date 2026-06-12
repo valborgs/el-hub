@@ -49,13 +49,12 @@ flowchart TD
 error_list_dist/
 ├── error_list_auto_classify.py # 자동 분류·분배·Diff 핵심 엔진 (CLI + process_error_list)
 ├── error_list_gui.py           # gui 패키지 진입 shim (python error_list_gui.py)
-├── error_list_gui.spec         # PyInstaller 빌드 스펙 파일
 ├── pyproject.toml / uv.lock    # 의존성 정의 (uv)
 ├── config.json                 # 테마 등 설정
 ├── gui/                        # PySide6 GUI 패키지
 │   ├── app.py                  # 메인 창(ErrorListApp) + main(); 실행 상태 파일 등록
 │   ├── worker.py               # ClassifyWorker (QThread) — 엔진 비동기 실행
-│   ├── paths.py                # sys.path 부트스트랩 (frozen-exe 대응)
+│   ├── paths.py                # sys.path 부트스트랩
 │   └── config.py · style.py · palette.py · fonts.py · dialogs.py · utils.py
 ├── fonts/                      # 번들 폰트
 └── README.md                   # 본 프로젝트 설명 문서
