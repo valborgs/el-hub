@@ -45,7 +45,7 @@ gui/                        PySide6 GUI shell (thin runner over the pipeline)
     app.py                  PipelineApp window + main(); box-range inputs, sheet radios, _register_runtime_state()
     worker.py               PipelineWorker (QThread) — chdir(PROJECT_ROOT) then run_pipeline
     paths.py                PROJECT_ROOT + sys.path bootstrap (frozen-exe aware)
-    config.py palette.py style.py fonts.py dialogs.py utils.py   config·theme·fonts·dialogs
+    config.py palette.py style.py fonts.py dialogs.py utils.py   thin shims over the shared `elhub_ui` design system (re-export/wrap, injecting this app's FONT_DIR/CONFIG_FILE/README_PATH + app-specific QSS); `gui/paths.py` adds the repo root to sys.path so `import elhub_ui` resolves. See `../CLAUDE.md` › "Shared design system".
 common/pipeline.py          run_pipeline() — the 5-stage orchestrator
 common/pipeline_without_diff.py   3-stage variant (no diff/XML patch)
 common/constants.py         column mapping, GROUPS, sheet names, shared constants

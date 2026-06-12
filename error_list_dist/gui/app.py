@@ -4,21 +4,20 @@
 import os
 import sys
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication, QFrame, QHBoxLayout, QLabel, QListWidget,
-    QListWidgetItem, QMessageBox, QPlainTextEdit, QPushButton,
-    QSizePolicy, QToolButton, QVBoxLayout, QWidget,
+    QListWidgetItem, QMessageBox, QPushButton,
+    QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from .config import load_config
 from .dialogs import HelpDialog, SettingsDialog
 from .fonts import load_application_fonts
 from .utils import make_emoji_icon
-from .palette import LOG_COLORS
 from .style import apply_theme, set_titlebar_color
 from .worker import ClassifyWorker
+from elhub_ui.components import LogPanel
 
 
 def list_xlsx_files(directory: str) -> list[str]:
@@ -61,12 +60,10 @@ class ErrorListApp(QWidget):
 
         root.addWidget(self._build_file_card())
         root.addLayout(self._build_action_row())
-        root.addWidget(self._build_log_section())
 
-        # 초기: 로그창 닫힘
-        self.log_output.setVisible(False)
-        self._log_toggle_btn.setArrowType(Qt.RightArrow)
-        self._log_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        # 접이식 로그 패널 (공용 컴포넌트, 초기 닫힘)
+        self.log_panel = LogPanel(mono=self._mono, min_height=220, theme=self._theme)
+        root.addWidget(self.log_panel)
 
     # ── 섹션 빌더 ─────────────────────────────────────────────────────────
 
@@ -138,65 +135,6 @@ class ErrorListApp(QWidget):
         row.addWidget(self.help_btn)
         return row
 
-    def _build_log_section(self) -> QWidget:
-        container = QWidget()
-        container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self._log_container = container
-
-        vbox = QVBoxLayout(container)
-        vbox.setContentsMargins(0, 0, 0, 0)
-        vbox.setSpacing(4)
-
-        # 토글 헤더
-        header = QWidget()
-        header.setCursor(Qt.PointingHandCursor)
-        header_row = QHBoxLayout(header)
-        header_row.setContentsMargins(2, 4, 2, 4)
-        header_row.setSpacing(6)
-
-        self._log_toggle_btn = QToolButton()
-        self._log_toggle_btn.setArrowType(Qt.RightArrow)
-        self._log_toggle_btn.setStyleSheet(
-            "QToolButton { border: none; background: transparent; }"
-        )
-
-        log_title = QLabel("진행 상황")
-        log_title.setObjectName("title")
-
-        header_row.addWidget(self._log_toggle_btn)
-        header_row.addWidget(log_title)
-        header_row.addStretch()
-
-        self._log_toggle_btn.clicked.connect(self._toggle_log)
-        header.mousePressEvent = lambda _: self._toggle_log()
-        vbox.addWidget(header)
-
-        # 로그 본문
-        self.log_output = QPlainTextEdit()
-        self.log_output.setObjectName("log")
-        self.log_output.setReadOnly(True)
-        self.log_output.setMinimumHeight(220)
-        self.log_output.setFont(QFont(self._mono, 10))
-        vbox.addWidget(self.log_output)
-
-        return container
-
-    # ── 로그 토글 ──────────────────────────────────────────────────────────
-
-    def _toggle_log(self) -> None:
-        closing = self.log_output.isVisible()
-        if not closing:
-            self._size_before_log = self.size()
-        self.log_output.setVisible(not closing)
-        self._log_toggle_btn.setArrowType(Qt.RightArrow if closing else Qt.DownArrow)
-        self._log_container.setSizePolicy(
-            QSizePolicy.Expanding,
-            QSizePolicy.Fixed if closing else QSizePolicy.Expanding,
-        )
-        if closing and hasattr(self, "_size_before_log"):
-            saved = self._size_before_log
-            QTimer.singleShot(0, lambda: self.resize(saved))
-
     # ── 테마 ──────────────────────────────────────────────────────────────
 
     def showEvent(self, event):
@@ -206,7 +144,7 @@ class ErrorListApp(QWidget):
     def apply_theme(self, mode: str) -> None:
         self._theme = mode
         apply_theme(QApplication.instance(), mode, self._sans, self._mono)
-        self.log_output.setFont(QFont(self._mono, 10))
+        self.log_panel.set_theme(mode)
         set_titlebar_color(int(self.winId()), mode)
 
     # ── 슬롯 ──────────────────────────────────────────────────────────────
@@ -234,22 +172,11 @@ class ErrorListApp(QWidget):
     def _reset_ui(self):
         self.file_list.clearSelection()
         self.file_list.setCurrentItem(None)
-        self.log_output.clear()
+        self.log_panel.clear()
         self._refresh_file_list()
 
     def _log(self, status: str, message: str) -> None:
-        colors = LOG_COLORS.get(self._theme, LOG_COLORS["dark"])
-        color  = colors.get(status, colors["info"])
-        escaped = (
-            message
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-        )
-        self.log_output.appendHtml(f'<span style="color:{color};">{escaped}</span>')
-        self.log_output.verticalScrollBar().setValue(
-            self.log_output.verticalScrollBar().maximum()
-        )
+        self.log_panel.append(status, message)
 
     def _set_controls_enabled(self, enabled: bool):
         self.run_btn.setEnabled(enabled)
@@ -273,9 +200,9 @@ class ErrorListApp(QWidget):
             self._refresh_file_list()
             return
 
-        self.log_output.clear()
-        if not self.log_output.isVisible():
-            self._toggle_log()
+        self.log_panel.clear()
+        if not self.log_panel.is_open():
+            self.log_panel.toggle()
 
         self._set_controls_enabled(False)
         self._log("info", "🚀 자동분류를 시작합니다...")

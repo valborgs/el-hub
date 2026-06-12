@@ -5,21 +5,20 @@ import ctypes
 import os
 import sys
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication, QButtonGroup, QFileDialog, QFrame, QHBoxLayout,
-    QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton,
-    QRadioButton, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
+    QLabel, QLineEdit, QMessageBox, QPushButton,
+    QRadioButton, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from .config import load_config
 from .dialogs import HelpDialog, SettingsDialog
 from .fonts import load_application_fonts
 from .utils import make_emoji_icon
-from .palette import LOG_COLORS
 from .style import apply_theme, set_titlebar_color
 from .worker import PipelineWorker
+from elhub_ui.components import LogPanel
 
 from common.logger import FileLogger  # noqa: E402  (paths.py에서 sys.path 부트스트랩됨)
 
@@ -73,12 +72,10 @@ class PipelineApp(QWidget):
 
         root.addWidget(self._build_box_card())
         root.addLayout(self._build_action_row())
-        root.addWidget(self._build_log_section())
 
-        # 초기: 로그창 닫힘
-        self.log_output.setVisible(False)
-        self._log_toggle_btn.setArrowType(Qt.RightArrow)
-        self._log_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        # 접이식 로그 패널 (공용 컴포넌트, 초기 닫힘)
+        self.log_panel = LogPanel(mono=self._mono, min_height=260, theme=self._theme)
+        root.addWidget(self.log_panel)
 
     # ── 섹션 빌더 ─────────────────────────────────────────────────────────
 
@@ -246,65 +243,6 @@ class PipelineApp(QWidget):
         row.addWidget(self.help_btn)
         return row
 
-    def _build_log_section(self) -> QWidget:
-        container = QWidget()
-        container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self._log_container = container
-
-        vbox = QVBoxLayout(container)
-        vbox.setContentsMargins(0, 0, 0, 0)
-        vbox.setSpacing(4)
-
-        # 토글 헤더
-        header = QWidget()
-        header.setCursor(Qt.PointingHandCursor)
-        header_row = QHBoxLayout(header)
-        header_row.setContentsMargins(2, 4, 2, 4)
-        header_row.setSpacing(6)
-
-        self._log_toggle_btn = QToolButton()
-        self._log_toggle_btn.setArrowType(Qt.RightArrow)
-        self._log_toggle_btn.setStyleSheet(
-            "QToolButton { border: none; background: transparent; }"
-        )
-
-        log_title = QLabel("진행 상황")
-        log_title.setObjectName("title")
-
-        header_row.addWidget(self._log_toggle_btn)
-        header_row.addWidget(log_title)
-        header_row.addStretch()
-
-        self._log_toggle_btn.clicked.connect(self._toggle_log)
-        header.mousePressEvent = lambda _: self._toggle_log()
-        vbox.addWidget(header)
-
-        # 로그 본문
-        self.log_output = QPlainTextEdit()
-        self.log_output.setObjectName("log")
-        self.log_output.setReadOnly(True)
-        self.log_output.setMinimumHeight(260)
-        self.log_output.setFont(QFont(self._mono, 10))
-        vbox.addWidget(self.log_output)
-
-        return container
-
-    # ── 로그 토글 ──────────────────────────────────────────────────────────
-
-    def _toggle_log(self) -> None:
-        closing = self.log_output.isVisible()
-        if not closing:
-            self._size_before_log = self.size()
-        self.log_output.setVisible(not closing)
-        self._log_toggle_btn.setArrowType(Qt.RightArrow if closing else Qt.DownArrow)
-        self._log_container.setSizePolicy(
-            QSizePolicy.Expanding,
-            QSizePolicy.Fixed if closing else QSizePolicy.Expanding,
-        )
-        if closing and hasattr(self, "_size_before_log"):
-            saved = self._size_before_log
-            QTimer.singleShot(0, lambda: self.resize(saved))
-
     # ── 테마 ──────────────────────────────────────────────────────────────
 
     def nativeEvent(self, event_type: bytes, message: int):
@@ -330,7 +268,7 @@ class PipelineApp(QWidget):
     def apply_theme(self, mode: str) -> None:
         self._theme = mode
         apply_theme(QApplication.instance(), mode, self._sans, self._mono)
-        self.log_output.setFont(QFont(self._mono, 10))
+        self.log_panel.set_theme(mode)
         set_titlebar_color(int(self.winId()), mode)
 
     # ── 슬롯 ──────────────────────────────────────────────────────────────
@@ -369,21 +307,10 @@ class PipelineApp(QWidget):
         self.radio_seoul.setChecked(True)
         self.start_input.clear()
         self.end_input.clear()
-        self.log_output.clear()
+        self.log_panel.clear()
 
     def _log(self, status: str, message: str) -> None:
-        colors = LOG_COLORS.get(self._theme, LOG_COLORS["dark"])
-        color  = colors.get(status, colors["info"])
-        escaped = (
-            message
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-        )
-        self.log_output.appendHtml(f'<span style="color:{color};">{escaped}</span>')
-        self.log_output.verticalScrollBar().setValue(
-            self.log_output.verticalScrollBar().maximum()
-        )
+        self.log_panel.append(status, message)
         if getattr(self, "file_logger", None) is not None:
             self.file_logger.log(status, message)
 
@@ -411,9 +338,9 @@ class PipelineApp(QWidget):
         gsheet_idx = self.radio_group.checkedId()
         run_diff   = load_config().get("run_diff", True)
 
-        self.log_output.clear()
-        if not self.log_output.isVisible():
-            self._toggle_log()
+        self.log_panel.clear()
+        if not self.log_panel.is_open():
+            self.log_panel.toggle()
 
         self._set_controls_enabled(False)
         self.file_logger = FileLogger()

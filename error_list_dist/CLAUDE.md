@@ -28,7 +28,7 @@ gui/                      PySide6 GUI package
     worker.py            ClassifyWorker (QThread) → wraps process_error_list, emits log/finished
     paths.py             sys.path bootstrap (frozen-exe aware) — makes the engine importable
     config.py            config.json load/save (only key: "theme")
-    style.py palette.py fonts.py dialogs.py utils.py   테마·폰트·도움말·아이콘
+    style.py palette.py fonts.py dialogs.py utils.py   thin shims over the shared `elhub_ui` design system (re-export/wrap with this app's FONT_DIR/CONFIG_FILE/README_PATH + app-specific QSS like `#file-list`); `gui/paths.py` adds the repo root to sys.path so `import elhub_ui` resolves. See `../CLAUDE.md` › "Shared design system". The collapsible log is `elhub_ui.components.LogPanel`.
 error_list_auto_classify.py   the whole classification/distribution/diff engine (CLI + process_error_list)
 ```
 

@@ -1,15 +1,7 @@
 # -*- coding: utf-8 -*-
-"""gui 내부 공유 유틸리티."""
+"""gui 내부 공유 유틸리티 — 공용 구현(elhub_ui)에서 재노출."""
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QIcon, QPainter, QPixmap
+from . import paths  # noqa: F401  (sys.path 부트스트랩)
+from elhub_ui.icons import make_emoji_icon
 
-
-def make_emoji_icon(emoji: str, size: int = 64) -> QIcon:
-    px = QPixmap(size, size)
-    px.fill(Qt.transparent)
-    painter = QPainter(px)
-    painter.setFont(QFont("Segoe UI Emoji", int(size * 0.7)))
-    painter.drawText(px.rect(), Qt.AlignCenter, emoji)
-    painter.end()
-    return QIcon(px)
+__all__ = ["make_emoji_icon"]

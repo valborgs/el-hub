@@ -23,3 +23,9 @@ if _BUNDLE_DIR not in sys.path:
     sys.path.insert(0, _BUNDLE_DIR)
 if _WRITABLE_DIR not in sys.path:
     sys.path.insert(0, _WRITABLE_DIR)
+
+# 워크스페이스 루트(auto/)를 sys.path 에 추가해 공용 디자인 패키지(elhub_ui)를 import 가능하게 한다.
+# 서브앱은 cwd 가 자기 폴더라 루트가 기본 경로에 없다. (소스 실행만 하므로 frozen 분기 불필요)
+_REPO_ROOT = os.path.dirname(_BUNDLE_DIR)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)

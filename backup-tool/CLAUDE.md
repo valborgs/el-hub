@@ -34,6 +34,8 @@ Real-time folder backup desktop app (Python + PySide6). Monitors a source direct
 | `app/ui/signals.py` | `WorkerSignals` — Qt signals bridging background threads → main thread |
 | `app/ui/main_window.py` | Full PySide6 UI, state machine, system tray, Drive integration |
 
+`app/ui/palette.py` and `app/ui/style.py` are thin shims over the shared root `elhub_ui` design system: `palette.py` re-exports the unified `PALETTE`/`LOG_COLORS`, and `style.py` keeps only this app's QSS (custom title bar, `#browse-btn`, `#toolbar-btn`, `#gdrive-toggle`, menus, progress dialog) as `extra_qss` on top of `elhub_ui`'s base QSS, re-exporting `apply_theme`/`set_titlebar_color`/`set_window_rounded`. `app/__init__.py` adds the repo root to `sys.path` so `import elhub_ui` resolves (same reason `hub_auth`/`proc_state` are loaded by absolute path). See `../CLAUDE.md` › "Shared design system".
+
 > `app/ui/main_window_backup.py` is a stale, unused copy of an earlier `main_window`. `main.py` imports `app.ui.main_window`; the `_backup` file is dead — don't edit it.
 
 ### Threading model

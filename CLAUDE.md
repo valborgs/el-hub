@@ -25,7 +25,7 @@ This is a **Windows-only** workspace in practice: process detection, window focu
 
 ## Hub architecture
 
-`hub.py` is a single-window PySide6 dashboard. `HubWindow` builds one `AppCard` per tool plus a Google-account row and a 출퇴근 (clock-in/out) row. Three shared root modules carry all the cross-app coordination:
+`hub.py` is a single-window PySide6 dashboard. `HubWindow` builds one `AppCard` per tool plus a Google-account row and a 출퇴근 (clock-in/out) row. Shared root modules carry all the cross-app coordination:
 
 | Module | Role |
 |--------|------|
@@ -33,6 +33,7 @@ This is a **Windows-only** workspace in practice: process detection, window focu
 | `hub_auth.py` | Cancelable Google OAuth flow; login/logout/get_email/get_credentials |
 | `secure_store.py` | DPAPI-encrypt the OAuth token and store it in Windows Credential Manager |
 | `proc_state.py` | Read/write `runtime_state.json` to detect whether an app is running |
+| `elhub_ui/` | **Shared design system** (palette, base QSS, DWM helpers, fonts, icons, dialogs, widgets) used by the hub *and* all three subapps |
 
 ### How a card decides "실행" vs "열기"
 
@@ -53,6 +54,26 @@ Two constraints that are easy to break:
 ### Process liveness via `runtime_state.json`
 
 `proc_state.write(path, **extra)` records `{pid, create_time, ...}`; `read_live(path)` returns the dict **only if** that pid is still alive *and* its process creation time matches (guards against PID reuse). Each app writes this on start and clears it on exit; the hub reads it both to render card state and to check app-specific flags — e.g. `_is_gdrive_backup_active()` reads backup-tool's `gdrive_enabled` flag to warn before logout. `runtime_state.json` is gitignored.
+
+### Shared design system (`elhub_ui/`)
+
+The hub and all three subapps share **one** design system, single-sourced in the root `elhub_ui/` package:
+
+| Module | Provides |
+|--------|----------|
+| `palette.py` | Unified `PALETTE` (light/dark, all keys merged: common + `btn_bg` + `green`/`red`) and `LOG_COLORS` |
+| `style.py` | `make_base_qss(theme, sans, mono)` (common selectors only), `apply_theme(app, theme, sans, mono, extra_qss="")`, and DWM helpers `set_titlebar_color`/`set_titlebar_dark`/`set_window_rounded` |
+| `fonts.py` | `load_application_fonts(font_dir)` |
+| `icons.py` | `make_emoji_icon` |
+| `dialogs.py` | `HelpDialog(readme_path)`; `SettingsDialog` base (theme row + `add_extra_rows`/`read_extra`/`write_extra` hooks) |
+| `components.py` | `DotIndicator`, `make_wave_frames`, `LogPanel` (collapsible log) |
+
+How consumers wire in:
+
+- **App-specific QSS** lives at each app, not in the base. `apply_theme` concatenates `make_base_qss(...) + extra_qss`, so each app injects only its own object-name selectors (e.g. scrape's `#file-pill`, error_list's `#file-list`, backup-tool's `#title-bar`/`#gdrive-toggle`). The hub does the same with `_HUB_QSS` (`#launch`, `#cardScroll`).
+- **Each subapp's `gui/palette.py`, `gui/style.py`, `gui/fonts.py`, `gui/utils.py`, `gui/dialogs.py`, `gui/config.py` are now thin shims** that re-export / wrap `elhub_ui`, supplying app-local params (FONT_DIR, CONFIG_FILE, README_PATH, the `extra_qss`). The app windows still `from .style import apply_theme` etc. — unchanged.
+- **sys.path bootstrap.** Like the other root modules, `auto/` is not on a subapp's path. The scrape/error_list `gui/paths.py` and backup-tool's `app/__init__.py` insert the repo root into `sys.path` so `import elhub_ui` resolves. The hub runs from the root and imports it directly.
+- **Source-run only.** The subapps are launched from source via their `.venv` python — there is **no PyInstaller build** in use, so `elhub_ui` needs no spec/bundling changes. (If exe builds resume, add the repo root to the spec `pathex` and `elhub_ui.*` to `hiddenimports`.)
 
 ### Threading
 

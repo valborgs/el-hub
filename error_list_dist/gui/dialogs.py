@@ -1,176 +1,25 @@
 # -*- coding: utf-8 -*-
-"""환경 설정·도움말 팝업 다이얼로그."""
+"""환경 설정·도움말 팝업 — 공용 베이스(elhub_ui) 위임.
 
-import re
+이 앱의 설정 항목은 테마뿐이라 베이스 SettingsDialog 를 그대로 쓴다.
+"""
 
-import markdown as _md
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (
-    QButtonGroup, QDialog, QHBoxLayout, QLabel, QMessageBox,
-    QPushButton, QRadioButton, QSizePolicy, QSpacerItem,
-    QTextBrowser, QVBoxLayout, QWidget,
-)
-
+from . import paths  # noqa: F401  (sys.path 부트스트랩)
+from elhub_ui.dialogs import HelpDialog as _HelpDialog
+from elhub_ui.dialogs import SettingsDialog as _SettingsDialog
 from .config import load_config, save_config
-from .utils import make_emoji_icon
 from .paths import README_PATH
 
 
-# ---------------------------------------------------------------------------
-# 도움말 팝업
-# ---------------------------------------------------------------------------
-_HELP_HTML_STYLE = """
-<style>
-  body   { font-family: 'Malgun Gothic', sans-serif; font-size: 13px;
-           line-height: 1.7; background: transparent; margin: 12px; }
-  h1     { font-size: 18px; border-bottom: 2px solid #7B8A6E; padding-bottom: 6px; }
-  h2     { font-size: 15px; border-bottom: 1px solid #8A857B; padding-bottom: 4px; margin-top: 20px; }
-  h3     { font-size: 13px; margin-top: 14px; }
-  code   { background: rgba(123,138,110,0.15); padding: 1px 5px;
-           border-radius: 3px; font-family: Consolas, monospace; }
-  pre    { background: rgba(123,138,110,0.10); padding: 10px; border-radius: 4px;
-           font-family: Consolas, monospace; font-size: 12px; }
-  table  { border-collapse: collapse; width: 100%; margin: 8px 0; }
-  th, td { border: 1px solid #8A857B; padding: 5px 10px; }
-  th     { background: rgba(123,138,110,0.15); }
-  blockquote { border-left: 3px solid #7B8A6E; margin: 4px 0;
-               padding: 4px 12px; color: #6B6B6B; }
-</style>
-"""
+class HelpDialog(_HelpDialog):
+    """README.md 도움말 팝업 (이 앱의 README 경로 주입)."""
 
-
-class HelpDialog(QDialog):
     def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("사용설명서")
-        self.resize(680, 620)
-        self._init_ui()
-
-    def _init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 12)
-        layout.setSpacing(0)
-
-        browser = QTextBrowser()
-        browser.setOpenExternalLinks(True)
-        # 도움말 창은 테마와 무관하게 항상 밝은 배경 유지
-        browser.setStyleSheet(
-            "QTextBrowser { background-color: #FAFAFA; color: #1A1A1A; border: none; }"
-        )
-        browser.setHtml(self._load_html())
-        layout.addWidget(browser)
-
-        close_btn = QPushButton("닫기")
-        close_btn.setFixedWidth(80)
-        close_btn.clicked.connect(self.accept)
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        btn_row.addWidget(close_btn)
-        btn_row.setContentsMargins(0, 0, 12, 0)
-        layout.addLayout(btn_row)
-
-    def _load_html(self) -> str:
-        from markdown.extensions.toc import slugify_unicode
-        try:
-            with open(README_PATH, "r", encoding="utf-8") as f:
-                text = f.read()
-            body = _md.markdown(
-                text,
-                extensions=["tables", "fenced_code", "toc"],
-                extension_configs={"toc": {"slugify": slugify_unicode}},
-            )
-            body = re.sub(
-                r'<(h[1-6]) id="([^"]+)">',
-                r'<\1><a name="\2"></a>',
-                body,
-            )
-        except FileNotFoundError:
-            body = "<p>README.md 파일을 찾을 수 없습니다.</p>"
-        return _HELP_HTML_STYLE + body
+        super().__init__(README_PATH, parent)
 
 
-# ---------------------------------------------------------------------------
-# 환경 설정 팝업
-# ---------------------------------------------------------------------------
-class SettingsDialog(QDialog):
-    theme_changed = Signal(str)
+class SettingsDialog(_SettingsDialog):
+    """테마 설정만 제공."""
 
     def __init__(self, current_theme: str, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("환경 설정")
-        self.setWindowIcon(make_emoji_icon("⚙️", 64))
-        self.setMinimumWidth(380)
-        self._current_theme = current_theme
-        self._init_ui()
-        self._load_settings()
-
-    def _init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setSpacing(16)
-        layout.setContentsMargins(24, 24, 24, 20)
-
-        _LABEL_WIDTH = 60
-
-        def make_row(label_text: str, widget) -> QHBoxLayout:
-            row = QHBoxLayout()
-            row.setSpacing(12)
-            lbl = QLabel(label_text)
-            lbl.setFixedWidth(_LABEL_WIDTH)
-            lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            row.addWidget(lbl)
-            row.addWidget(widget, 1)
-            return row
-
-        # 테마
-        self._theme_group = QButtonGroup(self)
-        self._radio_dark  = QRadioButton("다크")
-        self._radio_light = QRadioButton("라이트")
-        self._theme_group.addButton(self._radio_dark,  0)
-        self._theme_group.addButton(self._radio_light, 1)
-
-        theme_widget = QWidget()
-        theme_inner  = QHBoxLayout(theme_widget)
-        theme_inner.setContentsMargins(0, 0, 0, 0)
-        theme_inner.setSpacing(20)
-        theme_inner.addWidget(self._radio_dark)
-        theme_inner.addWidget(self._radio_light)
-        theme_inner.addStretch()
-        layout.addLayout(make_row("테마:", theme_widget))
-
-        layout.addItem(QSpacerItem(0, 8, QSizePolicy.Minimum, QSizePolicy.Fixed))
-
-        # 버튼
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(10)
-        save_btn   = QPushButton("저장")
-        save_btn.setObjectName("primary")
-        save_btn.setDefault(True)
-        save_btn.setFixedHeight(36)
-        cancel_btn = QPushButton("취소")
-        cancel_btn.setFixedHeight(36)
-        save_btn.clicked.connect(self._save_settings)
-        cancel_btn.clicked.connect(self.reject)
-        btn_row.addStretch()
-        btn_row.addWidget(cancel_btn)
-        btn_row.addWidget(save_btn)
-        layout.addLayout(btn_row)
-
-    def _load_settings(self):
-        cfg = load_config()
-        saved_theme = cfg.get("theme", "dark")
-        (self._radio_dark if saved_theme == "dark" else self._radio_light).setChecked(True)
-
-    def _save_settings(self):
-        selected_theme = "dark" if self._radio_dark.isChecked() else "light"
-        cfg = load_config()
-        cfg["theme"] = selected_theme
-        try:
-            save_config(cfg)
-        except Exception as e:
-            QMessageBox.warning(self, "오류", f"설정 저장 중 오류:\n{e}")
-            return
-        if selected_theme != self._current_theme:
-            self._current_theme = selected_theme
-            self.theme_changed.emit(selected_theme)
-        QMessageBox.information(self, "저장 완료", "설정이 저장되었습니다.")
-        self.accept()
+        super().__init__(current_theme, load_config, save_config, parent)

@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import math
 import subprocess
 import sys
 import threading
@@ -12,38 +11,26 @@ from pathlib import Path
 
 import hub_auth
 import proc_state
-from PySide6.QtCore import QObject, QRectF, QTimer, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPen, QIcon
+from elhub_ui.components import DotIndicator, make_wave_frames
+from elhub_ui.palette import PALETTE
+from elhub_ui.style import apply_theme, set_titlebar_dark
+from PySide6.QtCore import QObject, QTimer, Qt, Signal
 from PySide6.QtWidgets import (
     QApplication, QFrame, QHBoxLayout, QLabel, QMessageBox,
-    QPushButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
+    QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
 HERE = Path(__file__).parent
 TIMESHEET_FILE = HERE / "timesheet.txt"
 
-# ── 팔레트 ──────────────────────────────────────────────────────────────────
-P = dict(
-    bg="#1A1916", surface="#24221E", surface_alt="#15140F",
-    text="#E8E4DA", text_muted="#8A857B", border="#2F2D29",
-    accent="#94A484", accent_hover="#A4B494", accent_fg="#1A1916",
-    green="#7CB47C", red="#D08585",
-)
+# ── 팔레트 (공용 다크 토큰) ──────────────────────────────────────────────────
+P = PALETTE["dark"]
 
-QSS = f"""
-QWidget {{
-    background-color: {P['bg']};
-    color: {P['text']};
-    font-family: 'Malgun Gothic', sans-serif;
-    font-size: 13px;
-    outline: none;
-}}
+# 허브 고유 QSS — 공용 베이스 QSS(elhub_ui.style.make_base_qss) 위에 덧붙는다.
+_HUB_QSS = f"""
 QFrame#card {{
-    background-color: {P['surface']};
-    border: 1px solid {P['border']};
     border-radius: 12px;
 }}
-QLabel {{ background-color: transparent; border: none; color: {P['text']}; }}
 QLabel#name  {{ font-size: 15px; font-weight: 700; }}
 QLabel#desc  {{ color: {P['text_muted']}; font-size: 12px; }}
 QLabel#status {{ font-size: 11px; }}
@@ -98,26 +85,6 @@ class _AuthSignals(QObject):
     logout_done  = Signal(bool, str)   # (success, err_msg)
     email_ready  = Signal(str)         # email
     auth_invalid = Signal()            # 캐시 토큰이 무효 → 로그아웃 상태로 복원
-
-
-class DotIndicator(QWidget):
-    """원형 상태 표시 도트."""
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setFixedSize(10, 10)
-        self._color = QColor(P["text_muted"])
-
-    def set_running(self, running: bool) -> None:
-        self._color = QColor(P["green"] if running else P["text_muted"])
-        self.update()
-
-    def paintEvent(self, _):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setBrush(self._color)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.drawEllipse(0, 0, 10, 10)
 
 
 class AppCard(QFrame):
@@ -289,22 +256,7 @@ class AppCard(QFrame):
 
 _RESTORE_MSGS: dict[str, int] = {}
 
-def _make_wave_frames(slots: int = 5, n_frames: int = 16) -> list[str]:
-    """사인 파도 애니메이션 프레임을 생성한다. 파도는 오른쪽으로 흐른다."""
-    levels = "▁▂▃▄▅▆▇█"
-    n = len(levels)
-    period = 4.0  # 파장 (슬롯 단위)
-    frames = []
-    for p in range(n_frames):
-        shift = p * period / n_frames
-        row = ""
-        for i in range(slots):
-            val = 0.5 + 0.5 * math.sin(2 * math.pi * (i - shift) / period)
-            row += levels[min(n - 1, round(val * (n - 1)))]
-        frames.append(row)
-    return frames
-
-_PROGRESS_FRAMES = _make_wave_frames()
+_PROGRESS_FRAMES = make_wave_frames()
 _ANIM_INTERVAL_MS = 110
 
 
@@ -842,35 +794,9 @@ class HubWindow(QWidget):
         if self._commute_next_record_text:
             self._lbl_commute_record.setText(self._commute_next_record_text)
 
-    def _set_titlebar_dark(self) -> None:
-        if sys.platform != "win32":
-            return
-        try:
-            import ctypes
-            hwnd = int(self.winId())
-            DWMWA_USE_IMMERSIVE_DARK_MODE = 20
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE,
-                ctypes.byref(ctypes.c_int(1)), ctypes.sizeof(ctypes.c_int),
-            )
-            DWMWA_CAPTION_COLOR = 35
-
-            def colorref(h: str) -> int:
-                h = h.lstrip("#")
-                r, g, b = int(h[:2], 16), int(h[2:4], 16), int(h[4:], 16)
-                return b << 16 | g << 8 | r
-
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                hwnd, DWMWA_CAPTION_COLOR,
-                ctypes.byref(ctypes.c_int(colorref(P["bg"]))),
-                ctypes.sizeof(ctypes.c_int),
-            )
-        except Exception:
-            pass
-
     def showEvent(self, event):
         super().showEvent(event)
-        self._set_titlebar_dark()
+        set_titlebar_dark(int(self.winId()), "dark")
 
 
 def _resolve_app_cmd(subdir: str, script: str) -> list[str]:
@@ -893,7 +819,7 @@ def _resolve_app_cmd(subdir: str, script: str) -> list[str]:
 def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("앱 허브")
-    app.setStyleSheet(QSS)
+    apply_theme(app, "dark", extra_qss=_HUB_QSS)
     window = HubWindow()
     window.show()
     return app.exec()
